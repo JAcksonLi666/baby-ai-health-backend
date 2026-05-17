@@ -17,7 +17,7 @@
 - **OCR**: PaddleOCR 2.7.3
 - **向量数据库**: ChromaDB 0.4.22
 - **LLM 框架**: LangChain 0.1.4
-- **嵌入模型**: Sentence Transformers
+- **嵌入模型**: Ollama nomic-embed-text（推荐）/ Sentence Transformers（备选）
 - **本地模型**: Ollama (Qwen2.5:7B)
 - **语言**: Python 3.10+
 
@@ -66,9 +66,9 @@ pip install -r requirements.txt
 # Windows: https://github.com/ollama/ollama/releases
 # macOS/Linux: https://ollama.ai/download
 
-# 下载推荐模型
-ollama pull qwen2.5:7b
-ollama pull nomic-embed-text
+# 下载模型
+ollama pull qwen2.5:7b        # 对话模型
+ollama pull nomic-embed-text  # 嵌入模型（用于向量检索）
 
 # 启动 Ollama 服务
 ollama serve
@@ -88,12 +88,13 @@ HOST=0.0.0.0
 PORT=8000
 
 # Ollama 配置
-OLLAMA_HOST=http://localhost:11434
+OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:7b
 
 # 存储配置
 UPLOAD_DIR=data/uploads
-CHROMA_DIR=data/chroma
+VECTOR_DB_DIR=data/vector_db
+MODEL_CACHE_DIR=data/models
 
 # 文件限制
 MAX_UPLOAD_SIZE=10485760  # 10MB
@@ -105,7 +106,7 @@ LOG_LEVEL=INFO
 ### 启动服务
 
 ```bash
-# 开发模式
+# 开发模式（推荐）
 python main.py
 
 # 或使用 uvicorn
@@ -121,7 +122,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 | 方法 | 路径 | 描述 |
 |------|------|------|
 | GET | / | 基础健康检查 |
-| GET | /health | 详细健康检查（含 Ollama、ChromaDB 状态） |
+| GET | /health | 快速健康检查（含 ChromaDB、Embedding 状态） |
 
 ### 文件上传
 
@@ -207,6 +208,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `get_record()` - 获取单条记录
 - `delete_record()` - 删除记录
 
+**嵌入模型支持（自动选择）**：
+1. 优先使用 Ollama nomic-embed-text（推荐）
+2. 备选使用 Sentence Transformers
+3. 最后降级到简单哈希向量
+
 ### 3. LLM 服务 (`llm_service.py`)
 
 - `generate_local()` - 使用 Ollama 本地模型生成
@@ -230,8 +236,9 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 1. **医疗免责声明**：系统输出仅供参考，不能替代专业医疗诊断
 2. **数据安全**：敏感信息已脱敏处理，请勿上传未脱敏的原始文件
-3. **GPU 要求**：建议 8GB 以上显存以获得最佳性能
+3. **GPU 要求**：建议 8GB 以上显存以获得最佳性能（CPU 也可运行但速度较慢）
 4. **Ollama 服务**：启动后端前请确保 Ollama 服务正在运行
+5. **嵌入模型**：首次启动会自动检查/下载 nomic-embed-text 模型
 
 ## 📄 许可证
 

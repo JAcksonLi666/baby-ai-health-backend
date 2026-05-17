@@ -1,6 +1,6 @@
 import requests
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Iterator, Generator
 import json
 from config import OLLAMA_BASE_URL, OLLAMA_MODEL, CLOUD_API_KEY, CLOUD_API_BASE
 
@@ -104,6 +104,104 @@ class LLMService:
             }
         except Exception as e:
             logger.error(f"生成失败: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "model": model or self.default_model,
+                "source": "local"
+            }
+
+    def generate_local_stream(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        context: Optional[List[int]] = None
+    ) -> Generator[str, None, Dict]:
+        """流式调用本地 Ollama 模型生成文本"""
+        try:
+            model_name = model or self.default_model
+            
+            if context:
+                payload = {
+                    "model": model_name,
+                    "prompt": prompt,
+                    "context": context,
+                    "stream": True,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens
+                    }
+                }
+            else:
+                payload = {
+                    "model": model_name,
+                    "prompt": prompt,
+                    "stream": True,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens
+                    }
+                }
+            
+            with requests.post(
+                f"{self.ollama_base_url}/api/generate",
+                json=payload,
+                stream=True,
+                timeout=120
+            ) as response:
+                if response.status_code == 200:
+                    full_response = ""
+                    context_value = None
+                    for line in response.iter_lines():
+                        if line:
+                            try:
+                                data = json.loads(line.decode('utf-8'))
+                                token = data.get("response", "")
+                                full_response += token
+                                yield token
+                                
+                                if "context" in data:
+                                    context_value = data["context"]
+                            except json.JSONDecodeError:
+                                continue
+                    
+                    yield None
+                    
+                    result = {
+                        "success": True,
+                        "response": full_response,
+                        "model": model_name,
+                        "context": context_value or [],
+                        "source": "local"
+                    }
+                    return result
+                else:
+                    logger.error(f"Ollama 流式请求失败: {response.status_code} - {response.text}")
+                    yield f"错误: 请求失败 ({response.status_code})"
+                    yield None
+                    return {
+                        "success": False,
+                        "error": f"请求失败: {response.status_code}",
+                        "model": model_name,
+                        "source": "local"
+                    }
+                
+        except requests.exceptions.Timeout:
+            logger.error("Ollama 流式请求超时")
+            yield "错误: 请求超时，请检查模型是否正在加载"
+            yield None
+            return {
+                "success": False,
+                "error": "请求超时",
+                "model": model or self.default_model,
+                "source": "local"
+            }
+        except Exception as e:
+            logger.error(f"流式生成失败: {str(e)}")
+            yield f"错误: {str(e)}"
+            yield None
             return {
                 "success": False,
                 "error": str(e),

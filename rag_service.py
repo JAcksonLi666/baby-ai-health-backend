@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict
+from typing import List, Dict, Generator
 from vector_db import vector_db_service
 from llm_service import llm_service
 from config import OLLAMA_MODEL
@@ -21,7 +21,7 @@ class RAGService:
         include_history: bool = True
     ) -> str:
         """构建医疗问答 Prompt"""
-        
+
         system_prompt = """你是一个专业的儿科医疗健康助手。请根据提供的健康档案信息，回答用户的问题。
 
 重要提示：
@@ -37,16 +37,16 @@ class RAGService:
         if include_history and context_records:
             user_prompt += "相关健康档案信息：\n"
             user_prompt += "-" * 50 + "\n"
-            
+
             for i, record in enumerate(context_records, 1):
                 date = record.get("metadata", {}).get("date", "未知日期")
                 record_type = record.get("metadata", {}).get("record_type", "一般记录")
                 text = record.get("text", "")
                 similarity = record.get("similarity", 0)
-                
+
                 user_prompt += f"\n【记录 {i}】日期：{date}，类型：{record_type}，相关度：{similarity:.2%}\n"
                 user_prompt += f"内容：{text}\n"
-            
+
             user_prompt += "-" * 50 + "\n\n"
         else:
             user_prompt += "（暂无相关历史档案）\n\n"
@@ -59,7 +59,7 @@ class RAGService:
 
         full_prompt = system_prompt + user_prompt
         logger.info(f"构建 Prompt 成功，上下文记录数: {len(context_records)}")
-        
+
         return full_prompt
 
     def answer_question(
@@ -72,14 +72,14 @@ class RAGService:
         """基于 RAG 回答问题"""
         try:
             context_records = self.vector_db.search_similar(question, top_k=top_k)
-            
+
             prompt = self.build_medical_prompt(question, context_records)
-            
+
             if use_cloud:
                 llm_result = self.llm.generate_cloud(prompt)
             else:
                 llm_result = self.llm.generate_local(prompt, model=model)
-            
+
             if llm_result.get("success"):
                 return {
                     "success": True,
@@ -105,9 +105,59 @@ class RAGService:
                     "model_used": model or OLLAMA_MODEL,
                     "cloud_used": use_cloud
                 }
-                
+
         except Exception as e:
             logger.error(f"RAG 回答失败: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "sources": [],
+                "model_used": model or OLLAMA_MODEL,
+                "cloud_used": use_cloud
+            }
+
+    def answer_question_stream(
+        self,
+        question: str,
+        top_k: int = 3,
+        use_cloud: bool = False,
+        model: str = None
+    ) -> Generator[str, None, Dict]:
+        """基于 RAG 流式回答问题"""
+        try:
+            context_records = self.vector_db.search_similar(question, top_k=top_k)
+
+            prompt = self.build_medical_prompt(question, context_records)
+
+            sources = [
+                {
+                    "id": record["id"],
+                    "date": record.get("metadata", {}).get("date", ""),
+                    "type": record.get("metadata", {}).get("record_type", ""),
+                    "similarity": record.get("similarity", 0)
+                }
+                for record in context_records
+            ]
+
+            logger.info(f"开始流式生成，上下文记录数: {len(context_records)}")
+
+            for token in self.llm.generate_local_stream(prompt, model=model):
+                if token is None:
+                    break
+                yield token
+
+            result = {
+                "success": True,
+                "sources": sources,
+                "model_used": model or OLLAMA_MODEL,
+                "cloud_used": use_cloud,
+                "context_count": len(context_records)
+            }
+            return result
+
+        except Exception as e:
+            logger.error(f"RAG 流式回答失败: {str(e)}")
+            yield f"错误: {str(e)}"
             return {
                 "success": False,
                 "error": str(e),
@@ -125,14 +175,14 @@ class RAGService:
         try:
             query = f"{metric_name} 指标趋势分析"
             records = self.vector_db.search_similar(query, top_k=20)
-            
+
             if not records:
                 return {
                     "success": False,
                     "error": "未找到相关历史数据",
                     "metric": metric_name
                 }
-            
+
             analysis_prompt = f"""请分析以下{metric_name}的历史变化趋势：
 
 """
@@ -140,7 +190,7 @@ class RAGService:
                 text = record.get("text", "")
                 if metric_name.lower() in text.lower():
                     analysis_prompt += f"- {text}\n"
-            
+
             analysis_prompt += """
 请给出：
 1. 总体趋势（上升/下降/稳定）
@@ -149,9 +199,9 @@ class RAGService:
 
 注意：仅供参考，请咨询专业医生。
 """
-            
+
             result = self.llm.generate_local(analysis_prompt)
-            
+
             if result.get("success"):
                 return {
                     "success": True,
@@ -166,7 +216,7 @@ class RAGService:
                     "error": result.get("error", "分析失败"),
                     "metric": metric_name
                 }
-                
+
         except Exception as e:
             logger.error(f"趋势分析失败: {str(e)}")
             return {
