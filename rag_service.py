@@ -21,7 +21,6 @@ class RAGService:
         include_history: bool = True
     ) -> str:
         """构建医疗问答 Prompt"""
-
         system_prompt = """你是一个专业的儿科医疗健康助手。请根据提供的健康档案信息，回答用户的问题。
 
 重要提示：
@@ -37,7 +36,6 @@ class RAGService:
         if include_history and context_records:
             user_prompt += "相关健康档案信息：\n"
             user_prompt += "-" * 50 + "\n"
-
             for i, record in enumerate(context_records, 1):
                 date = record.get("metadata", {}).get("date", "未知日期")
                 record_type = record.get("metadata", {}).get("record_type", "一般记录")
@@ -59,7 +57,6 @@ class RAGService:
 
         full_prompt = system_prompt + user_prompt
         logger.info(f"构建 Prompt 成功，上下文记录数: {len(context_records)}")
-
         return full_prompt
 
     def answer_question(
@@ -79,7 +76,6 @@ class RAGService:
                 llm_result = self.llm.generate_cloud(prompt)
             else:
                 llm_result = self.llm.generate_local(prompt, model=model)
-
             if llm_result.get("success"):
                 return {
                     "success": True,
@@ -105,7 +101,6 @@ class RAGService:
                     "model_used": model or OLLAMA_MODEL,
                     "cloud_used": use_cloud
                 }
-
         except Exception as e:
             logger.error(f"RAG 回答失败: {str(e)}")
             return {
@@ -175,14 +170,12 @@ class RAGService:
         try:
             query = f"{metric_name} 指标趋势分析"
             records = self.vector_db.search_similar(query, top_k=20)
-
             if not records:
                 return {
                     "success": False,
                     "error": "未找到相关历史数据",
                     "metric": metric_name
                 }
-
             analysis_prompt = f"""请分析以下{metric_name}的历史变化趋势：
 
 """
@@ -190,7 +183,6 @@ class RAGService:
                 text = record.get("text", "")
                 if metric_name.lower() in text.lower():
                     analysis_prompt += f"- {text}\n"
-
             analysis_prompt += """
 请给出：
 1. 总体趋势（上升/下降/稳定）
@@ -216,7 +208,6 @@ class RAGService:
                     "error": result.get("error", "分析失败"),
                     "metric": metric_name
                 }
-
         except Exception as e:
             logger.error(f"趋势分析失败: {str(e)}")
             return {

@@ -111,7 +111,6 @@ async def upload_file(
             status_code=400,
             detail=f"不支持的文件类型: {file_ext}，支持的类型: {', '.join(ALLOWED_EXTENSIONS)}"
         )
-
     if file.size and file.size > MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=400,
@@ -132,7 +131,6 @@ async def upload_file(
             extracted_text = ocr_service.extract_text_from_pdf(str(file_path))
         else:
             extracted_text = ocr_service.extract_text_from_image(str(file_path))
-
         if not extracted_text:
             return UploadResponse(
                 success=False,
@@ -154,20 +152,17 @@ async def upload_file(
             "record_date": record_date or datetime.now().strftime("%Y-%m-%d"),
             "metrics_count": len(metrics)
         }
-
         storage_text = f"""日期：{metadata['record_date']}
 类型：{record_type}
 指标：{', '.join([m['name'] for m in metrics]) if metrics else 'N/A'}
 内容：{desensitized_text}
 """
-
         vector_db_service.add_record(
             record_id=file_id,
             text=storage_text,
             metadata=metadata,
             date=metadata['record_date']
         )
-
         return UploadResponse(
             success=True,
             file_id=file_id,
@@ -175,7 +170,6 @@ async def upload_file(
             message="上传成功，已完成 OCR 识别和向量化存储",
             extracted_text=desensitized_text
         )
-
     except Exception as e:
         logger.error(f"文件处理失败: {str(e)}")
         if file_path.exists():
@@ -196,7 +190,6 @@ async def ask_question(request: AskRequest):
             top_k=request.top_k,
             use_cloud=request.use_cloud
         )
-
         if result.get("success"):
             return AskResponse(
                 success=True,
@@ -213,7 +206,6 @@ async def ask_question(request: AskRequest):
                 model_used=result.get("model_used", "unknown"),
                 cloud_used=request.use_cloud
             )
-
     except Exception as e:
         logger.error(f"问答处理失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -281,7 +273,6 @@ async def get_records(limit: int = Query(50, ge=1, le=100)):
     try:
         records = vector_db_service.get_all_records(limit=limit)
         stats = vector_db_service.get_collection_stats()
-
         return {
             "success": True,
             "records": [
@@ -305,7 +296,6 @@ async def get_record(record_id: str):
     """获取指定健康档案详情"""
     try:
         record = vector_db_service.get_record(record_id)
-
         if record:
             return {
                 "success": True,
@@ -313,7 +303,6 @@ async def get_record(record_id: str):
             }
         else:
             raise HTTPException(status_code=404, detail="记录不存在")
-
     except HTTPException:
         raise
     except Exception as e:
@@ -326,7 +315,6 @@ async def delete_record(record_id: str):
     """删除指定健康档案"""
     try:
         success = vector_db_service.delete_record(record_id)
-
         if success:
             return {
                 "success": True,
@@ -334,7 +322,6 @@ async def delete_record(record_id: str):
             }
         else:
             raise HTTPException(status_code=500, detail="删除失败")
-
     except HTTPException:
         raise
     except Exception as e:
@@ -350,7 +337,6 @@ async def analyze_health_trend(
     """分析特定健康指标的历史趋势"""
     try:
         result = rag_service.analyze_health_trend(metric_name, time_range)
-
         if result.get("success"):
             return result
         else:
@@ -358,7 +344,6 @@ async def analyze_health_trend(
                 status_code=404,
                 content=result
             )
-
     except Exception as e:
         logger.error(f"趋势分析失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -369,7 +354,6 @@ async def get_available_models():
     """获取可用的 AI 模型列表"""
     try:
         ollama_status = rag_service.llm.check_ollama_health()
-
         if ollama_status:
             models = rag_service.llm.get_available_models()
             return {
@@ -385,7 +369,6 @@ async def get_available_models():
                 "models": [],
                 "message": "Ollama 服务未启动，请先运行 `ollama serve`"
             }
-
     except Exception as e:
         logger.error(f"获取模型列表失败: {str(e)}")
         return {
