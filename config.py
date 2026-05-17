@@ -22,6 +22,8 @@ CHROMA_COLLECTION_NAME = "baby_health_records"
 CLOUD_API_KEY = os.getenv("CLOUD_API_KEY", "")
 CLOUD_API_BASE = os.getenv("CLOUD_API_BASE", "https://api.deepseek.com")
 
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf', '.bmp', '.tiff'}
