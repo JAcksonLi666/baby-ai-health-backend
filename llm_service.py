@@ -24,17 +24,51 @@ class LLMService:
             logger.warning(f"Ollama 服务不可用: {str(e)}")
             return False
 
-    def get_available_models(self) -> List[str]:
-        """获取可用的 Ollama 模型列表"""
+    def get_available_models(self) -> List[Dict]:
+        """获取可用的 Ollama 模型列表（带详细信息）"""
         try:
             response = requests.get(f"{self.ollama_base_url}/api/tags", timeout=5)
             if response.status_code == 200:
                 models = response.json().get("models", [])
-                return [m["name"] for m in models]
+                return [
+                    {
+                        "name": m["name"],
+                        "size": m.get("size", 0),
+                        "modified_at": m.get("modified_at", "")
+                    }
+                    for m in models
+                ]
             return []
         except Exception as e:
             logger.error(f"获取模型列表失败: {str(e)}")
             return []
+
+    def get_model_info(self, model_name: str) -> Optional[Dict]:
+        """获取指定模型的详细信息"""
+        try:
+            response = requests.get(
+                f"{self.ollama_base_url}/api/show",
+                json={"name": model_name},
+                timeout=5
+            )
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            logger.error(f"获取模型信息失败: {str(e)}")
+            return None
+
+    def select_smartest_model(self) -> str:
+        """自动选择最大的模型（通常是最聪明的）"""
+        models = self.get_available_models()
+        if not models:
+            logger.warning("未找到可用模型，使用默认模型")
+            return self.default_model
+
+        sorted_models = sorted(models, key=lambda x: x.get("size", 0), reverse=True)
+        smartest = sorted_models[0]["name"]
+        logger.info(f"Auto 模式选择模型: {smartest} (size: {sorted_models[0].get('size', 0)})")
+        return smartest
 
     def generate_local(
         self,
@@ -159,14 +193,15 @@ class LLMService:
                             try:
                                 data = json.loads(line.decode('utf-8'))
                                 token = data.get("response", "")
-                                full_response += token
-                                yield token
-                                
+                                if token:
+                                    full_response += token
+                                    yield token
+
                                 if "context" in data:
                                     context_value = data["context"]
                             except json.JSONDecodeError:
                                 continue
-                    
+
                     yield None
                     
                     result = {

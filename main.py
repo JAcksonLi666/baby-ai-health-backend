@@ -188,7 +188,8 @@ async def ask_question(request: AskRequest):
         result = rag_service.answer_question(
             question=request.question,
             top_k=request.top_k,
-            use_cloud=request.use_cloud
+            use_cloud=request.use_cloud,
+            model=request.model
         )
         if result.get("success"):
             return AskResponse(
@@ -211,13 +212,14 @@ async def ask_question(request: AskRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def generate_stream_response(question: str, top_k: int = 3, use_cloud: bool = False):
+def generate_stream_response(question: str, top_k: int = 3, use_cloud: bool = False, model: str = "auto"):
     """生成流式响应"""
     try:
         result_gen = rag_service.answer_question_stream(
             question=question,
             top_k=top_k,
-            use_cloud=use_cloud
+            use_cloud=use_cloud,
+            model=model
         )
 
         sources = []
@@ -245,7 +247,8 @@ async def generate_stream_response(question: str, top_k: int = 3, use_cloud: boo
 async def ask_question_stream(
     question: str = Query(..., description="问题内容"),
     top_k: int = Query(3, ge=1, le=10, description="返回的参考档案数量"),
-    use_cloud: bool = Query(False, description="是否使用云端模型")
+    use_cloud: bool = Query(False, description="是否使用云端模型"),
+    model: str = Query("auto", description="模型名称，'auto' 表示自动选择最聪明的模型")
 ):
     """基于历史健康档案的智能问答（流式输出）"""
 
@@ -256,7 +259,8 @@ async def ask_question_stream(
         generate_stream_response(
             question=question,
             top_k=top_k,
-            use_cloud=use_cloud
+            use_cloud=use_cloud,
+            model=model
         ),
         media_type="text/event-stream",
         headers={
@@ -356,11 +360,16 @@ async def get_available_models():
         ollama_status = rag_service.llm.check_ollama_health()
         if ollama_status:
             models = rag_service.llm.get_available_models()
+            model_names = [m["name"] for m in models]
+            auto_model = rag_service.llm.select_smartest_model()
             return {
                 "success": True,
                 "ollama_online": True,
-                "models": models,
-                "default_model": rag_service.llm.default_model
+                "models": model_names,
+                "model_details": models,
+                "default_model": rag_service.llm.default_model,
+                "auto_model": auto_model,
+                "message": f"Auto 模式将自动选择: {auto_model}"
             }
         else:
             return {
@@ -376,6 +385,41 @@ async def get_available_models():
             "ollama_online": False,
             "error": str(e)
         }
+
+
+@app.get("/search/online", tags=["联网搜索"])
+async def online_search(
+    query: str = Query(..., description="搜索关键词"),
+    max_results: int = Query(5, ge=1, le=10, description="最大结果数")
+):
+    """使用 Tavily 进行联网搜索"""
+    try:
+        if not rag_service.tavily_enabled:
+            return {
+                "success": False,
+                "error": "Tavily API Key 未配置，无法使用联网搜索功能",
+                "results": []
+            }
+
+        result = rag_service.search_online(query, max_results)
+        return result
+    except Exception as e:
+        logger.error(f"联网搜索失败: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "results": []
+        }
+
+
+@app.get("/search/status", tags=["联网搜索"])
+async def search_status():
+    """获取联网搜索功能状态"""
+    return {
+        "enabled": rag_service.tavily_enabled,
+        "provider": "Tavily Search" if rag_service.tavily_enabled else None,
+        "quota": "每天 1000 次" if rag_service.tavily_enabled else None
+    }
 
 
 if __name__ == "__main__":

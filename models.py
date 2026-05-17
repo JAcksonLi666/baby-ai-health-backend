@@ -25,6 +25,7 @@ class AskRequest(BaseModel):
     question: str
     use_cloud: bool = False
     top_k: int = Field(default=3, ge=1, le=10)
+    model: Optional[str] = Field(default="auto", description="模型名称，'auto' 表示自动选择最聪明的模型")
 
 
 class AskResponse(BaseModel):

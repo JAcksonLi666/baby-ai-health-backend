@@ -2,8 +2,9 @@ import logging
 from typing import List, Dict, Generator
 from vector_db import vector_db_service
 from llm_service import llm_service
-from config import OLLAMA_MODEL
+from config import OLLAMA_MODEL, TAVILY_API_KEY
 import re
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,11 @@ class RAGService:
     def __init__(self):
         self.vector_db = vector_db_service
         self.llm = llm_service
+        self.tavily_enabled = bool(TAVILY_API_KEY)
+        if self.tavily_enabled:
+            logger.info("Tavily 联网搜索已启用")
+        else:
+            logger.info("Tavily API Key 未配置，联网搜索功能不可用")
         logger.info("RAG 服务初始化完成")
 
     def build_medical_prompt(
@@ -28,6 +34,20 @@ class RAGService:
 2. 如果涉及具体医疗决策，请务必咨询专业医生
 3. 请基于客观数据进行分析，避免主观臆断
 4. 对于婴儿健康问题，建议优先咨询儿科医生
+
+【药品名称识别与联想】
+当用户提及药品时，请自动进行以下联想识别：
+- 品牌名 → 通用名：美林 → 布洛芬混悬液，泰诺林 → 对乙酰氨基酚悬液
+- 俗称 → 学名：屁屁栓 → 对乙酰氨基酚栓剂，沐舒坦 → 盐酸氨溴索口服溶液
+- 剂型联想：混悬液、口服液、片剂、栓剂等不同剂型的同一成分药物
+- 儿童用药剂型：草莓味、橘子味等口味对应的药物成分
+
+请在你的回答中，先明确标注识别的药品通用名称和成分，再进行解答。
+
+【回答格式】
+1. 简要分析
+2. 可能的解读
+3. 建议（需明确标注仅供参考）
 
 """
 
@@ -49,10 +69,8 @@ class RAGService:
         else:
             user_prompt += "（暂无相关历史档案）\n\n"
 
-        user_prompt += """请基于以上信息，提供：
-1. 简要分析
-2. 可能的解读
-3. 建议（需明确标注仅供参考）
+        user_prompt += """请基于以上信息，结合药品名称联想能力，提供专业的分析和建议。
+
 """
 
         full_prompt = system_prompt + user_prompt
@@ -64,10 +82,13 @@ class RAGService:
         question: str,
         top_k: int = 3,
         use_cloud: bool = False,
-        model: str = None
+        model: str = "auto"
     ) -> Dict:
         """基于 RAG 回答问题"""
         try:
+            if model == "auto" or not model:
+                model = self.llm.select_smartest_model()
+
             context_records = self.vector_db.search_similar(question, top_k=top_k)
 
             prompt = self.build_medical_prompt(question, context_records)
@@ -116,10 +137,13 @@ class RAGService:
         question: str,
         top_k: int = 3,
         use_cloud: bool = False,
-        model: str = None
+        model: str = "auto"
     ) -> Generator[str, None, Dict]:
         """基于 RAG 流式回答问题"""
         try:
+            if model == "auto" or not model:
+                model = self.llm.select_smartest_model()
+
             context_records = self.vector_db.search_similar(question, top_k=top_k)
 
             prompt = self.build_medical_prompt(question, context_records)
@@ -134,7 +158,7 @@ class RAGService:
                 for record in context_records
             ]
 
-            logger.info(f"开始流式生成，上下文记录数: {len(context_records)}")
+            logger.info(f"开始流式生成，模型: {model}，上下文记录数: {len(context_records)}")
 
             for token in self.llm.generate_local_stream(prompt, model=model):
                 if token is None:
@@ -144,7 +168,7 @@ class RAGService:
             result = {
                 "success": True,
                 "sources": sources,
-                "model_used": model or OLLAMA_MODEL,
+                "model_used": model,
                 "cloud_used": use_cloud,
                 "context_count": len(context_records)
             }
@@ -214,6 +238,55 @@ class RAGService:
                 "success": False,
                 "error": str(e),
                 "metric": metric_name
+            }
+
+    def search_online(self, query: str, max_results: int = 5) -> Dict:
+        """使用 Tavily 进行联网搜索"""
+        if not self.tavily_enabled:
+            return {
+                "success": False,
+                "error": "Tavily API Key 未配置",
+                "results": []
+            }
+
+        try:
+            url = "https://api.tavily.com/search"
+            payload = {
+                "api_key": TAVILY_API_KEY,
+                "query": query,
+                "max_results": max_results,
+                "search_depth": "basic"
+            }
+
+            response = requests.post(url, json=payload, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                results = [
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "content": r.get("content", "")[:300]
+                    }
+                    for r in data.get("results", [])
+                ]
+                return {
+                    "success": True,
+                    "results": results,
+                    "query": query
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"搜索请求失败: {response.status_code}",
+                    "results": []
+                }
+        except Exception as e:
+            logger.error(f"联网搜索失败: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "results": []
             }
 
 
