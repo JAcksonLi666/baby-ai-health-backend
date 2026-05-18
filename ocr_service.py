@@ -317,6 +317,41 @@ class OCRService:
         
         return metrics
 
+    def extract_date_from_text(self, text: str) -> Optional[str]:
+        """从文本中识别日期，优先返回最可能的日期"""
+        if not text:
+            return None
+        
+        # 日期模式列表（按优先级排序）
+        date_patterns = [
+            # YYYY-MM-DD 格式（最常见）
+            r'(\d{4})[\-/年](\d{1,2})[\-/月](\d{1,2})[日号]?',
+            # YYYY/MM/DD 格式
+            r'(\d{4})/(\d{1,2})/(\d{1,2})',
+            # 采样时间/检验时间等
+            r'(?:采样|检验|检测|日期).*?(\d{4})[\-/年](\d{1,2})[\-/月](\d{1,2})[日号]?',
+            # 纯数字日期
+            r'\b(\d{4})(\d{2})(\d{2})\b',
+            # 中文日期
+            r'(\d{4})年(\d{1,2})月(\d{1,2})日?'
+        ]
+        
+        for pattern in date_patterns:
+            matches = re.findall(pattern, text)
+            for match in matches:
+                try:
+                    year = int(match[0])
+                    month = int(match[1])
+                    day = int(match[2])
+                    
+                    # 验证日期有效性
+                    if 2000 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+                        return f"{year:04d}-{month:02d}-{day:02d}"
+                except (ValueError, IndexError):
+                    continue
+        
+        return None
+
     def extract_health_indicators(self, text: str) -> Dict[str, str]:
         """从 OCR 结果中提取健康指标"""
         indicators = {}
