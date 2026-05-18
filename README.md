@@ -10,6 +10,7 @@
 - 🌐 **RESTful API**：完整的 CRUD 接口
 - 🔒 **隐私保护**：支持数据脱敏处理
 - 📊 **健康趋势分析**：基于历史数据的指标趋势分析
+- 📅 **日期自动识别**：从化验单自动提取日期信息
 
 ## 🛠️ 技术栈
 
@@ -133,7 +134,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 **请求参数：**
 - `file`: UploadFile - 化验单文件
 - `record_date`: str (可选) - 记录日期 YYYY-MM-DD
-- `record_type`: str (可选) - 记录类型: blood_test, urine_test, general
+- `record_type`: str (可选) - 记录类型: blood_test, urine_test, general, other
 
 **响应示例：**
 ```json
@@ -142,7 +143,24 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
   "file_id": "20240101120000_abc12345",
   "filename": "20240101120000_abc12345.jpg",
   "message": "上传成功，已完成 OCR 识别和向量化存储",
-  "extracted_text": "..."
+  "extracted_text": "...",
+  "record_date": "2024-01-01",
+  "record_type": "blood_test"
+}
+```
+
+### 预识别（仅识别不上传）
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | /preview | 预览识别结果（不保存到数据库） |
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "extracted_text": "...",
+  "detected_date": "2024-01-01"
 }
 ```
 
@@ -176,9 +194,23 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | /records | 获取所有档案列表 |
+| GET | /records | 获取所有档案列表（支持筛选） |
 | GET | /record/{record_id} | 获取指定档案详情 |
+| PUT | /record/{record_id} | 更新档案信息（日期、类型） |
 | DELETE | /record/{record_id} | 删除指定档案 |
+
+**GET /records 查询参数：**
+- `record_type`: str (可选) - 按类型筛选
+- `start_date`: str (可选) - 开始日期 YYYY-MM-DD
+- `end_date`: str (可选) - 结束日期 YYYY-MM-DD
+
+**PUT /record/{record_id} 请求体：**
+```json
+{
+  "record_date": "2024-01-15",
+  "record_type": "general"
+}
+```
 
 ### 健康分析
 
@@ -199,6 +231,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `extract_text_from_image()` - 从图片提取文字
 - `extract_text_from_pdf()` - 从 PDF 提取文字
 - `extract_health_indicators()` - 提取健康指标（体重、身高、体温等）
+- `extract_date()` - 从文本中提取日期信息
 
 ### 2. 向量数据库 (`vector_db.py`)
 
@@ -207,6 +240,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `get_all_records()` - 获取所有记录
 - `get_record()` - 获取单条记录
 - `delete_record()` - 删除记录
+- `update_record()` - 更新记录信息
 
 **嵌入模型支持（自动选择）**：
 1. 优先使用 Ollama nomic-embed-text（推荐）
@@ -239,6 +273,23 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 3. **GPU 要求**：建议 8GB 以上显存以获得最佳性能（CPU 也可运行但速度较慢）
 4. **Ollama 服务**：启动后端前请确保 Ollama 服务正在运行
 5. **嵌入模型**：首次启动会自动检查/下载 nomic-embed-text 模型
+6. **版本兼容**：PaddlePaddle 3.x 与 PaddleOCR 2.x 不兼容，需使用 PaddlePaddle 2.6.2 + PaddleOCR 2.7.3
+
+## 🔄 版本历史
+
+- **v1.1.0 (2026-05-18)** - 功能增强版本
+  - ✅ 添加档案更新接口（PUT /record/{id}）
+  - ✅ 添加预识别接口（POST /preview）
+  - ✅ 支持日期自动识别
+  - ✅ 支持记录类型筛选
+  - ✅ 修复 PaddleOCR 版本兼容问题
+  - ✅ 修复 OCR 服务脱敏方法缺失问题
+
+- **v1.0.0 (2026-05-16)** - MVP 版本
+  - ✅ 基础 OCR 识别功能
+  - ✅ 向量数据库存储
+  - ✅ RAG 智能问答
+  - ✅ 基础 CRUD 接口
 
 ## 📄 许可证
 
