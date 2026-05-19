@@ -56,3 +56,142 @@ class ErrorResponse(BaseModel):
     success: bool = False
     error: str
     detail: Optional[str] = None
+
+
+# ==================== MVP 日常记录模型 ====================
+
+class SleepType(str, Enum):
+    night = "night"
+    nap = "nap"
+
+class DiaperType(str, Enum):
+    pee = "pee"
+    poop = "poop"
+    both = "both"
+
+class PoopColor(str, Enum):
+    yellow = "yellow"
+    green = "green"
+    brown = "brown"
+    black = "black"
+    red = "red"
+    white = "white"
+    orange = "orange"
+
+class PoopConsistency(str, Enum):
+    watery = "watery"
+    soft = "soft"
+    normal = "normal"
+    hard = "hard"
+    pellet = "pellet"
+
+class Amount(str, Enum):
+    small = "small"
+    medium = "medium"
+    large = "large"
+
+class CryReason(str, Enum):
+    hungry = "hungry"
+    sleepy = "sleepy"
+    diaper = "diaper"
+    discomfort = "discomfort"
+    pain = "pain"
+    lonely = "lonely"
+    overstimulated = "overstimulated"
+    unknown = "unknown"
+
+# Sleep record models
+class SleepRecordCreate(BaseModel):
+    start_time: str = Field(..., description="入睡时间 YYYY-MM-DD HH:mm")
+    sleep_type: SleepType = Field(default=SleepType.night)
+    notes: Optional[str] = ""
+    is_ongoing: bool = False
+
+class SleepRecordUpdate(BaseModel):
+    end_time: Optional[str] = None
+    sleep_type: Optional[SleepType] = None
+    quality: Optional[int] = Field(None, ge=1, le=5)
+    notes: Optional[str] = None
+    is_ongoing: Optional[bool] = None
+
+class SleepRecordResponse(BaseModel):
+    id: str
+    start_time: str
+    end_time: Optional[str] = None
+    sleep_type: str
+    quality: Optional[int] = None
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = None
+    is_ongoing: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+# Diaper record models
+class DiaperRecordCreate(BaseModel):
+    time: str = Field(..., description="时间 YYYY-MM-DD HH:mm")
+    diaper_type: DiaperType
+    poop_color: Optional[PoopColor] = None
+    poop_consistency: Optional[PoopConsistency] = None
+    amount: Optional[Amount] = None
+    has_photo: bool = False
+    notes: Optional[str] = None
+
+class DiaperRecordUpdate(BaseModel):
+    time: Optional[str] = None
+    diaper_type: Optional[DiaperType] = None
+    poop_color: Optional[PoopColor] = None
+    poop_consistency: Optional[PoopConsistency] = None
+    amount: Optional[Amount] = None
+    has_photo: Optional[bool] = None
+    notes: Optional[str] = None
+
+class DiaperRecordResponse(BaseModel):
+    id: str
+    time: str
+    diaper_type: str
+    poop_color: Optional[str] = None
+    poop_consistency: Optional[str] = None
+    amount: Optional[str] = None
+    has_photo: bool = False
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+# Cry record models
+class CryRecordCreate(BaseModel):
+    start_time: str = Field(..., description="开始时间 YYYY-MM-DD HH:mm")
+    end_time: Optional[str] = None
+    reason: Optional[CryReason] = None
+    intensity: Optional[int] = Field(None, ge=1, le=5)
+    soothing_method: Optional[str] = None
+    has_audio: bool = False
+    notes: Optional[str] = None
+
+class CryRecordUpdate(BaseModel):
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    reason: Optional[CryReason] = None
+    intensity: Optional[int] = Field(None, ge=1, le=5)
+    soothing_method: Optional[str] = None
+    has_audio: Optional[bool] = None
+    notes: Optional[str] = None
+
+class CryRecordResponse(BaseModel):
+    id: str
+    start_time: str
+    end_time: Optional[str] = None
+    reason: Optional[str] = None
+    intensity: Optional[int] = None
+    soothing_method: Optional[str] = None
+    has_audio: bool = False
+    notes: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class TodaySummaryResponse(BaseModel):
+    date: str
+    sleep: dict
+    diaper: dict
+    cry: dict
+    insights: Optional[List[str]] = None

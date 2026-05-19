@@ -10,7 +10,10 @@ DATA_DIR = BASE_DIR / "data"
 VECTOR_DB_DIR = DATA_DIR / "vector_db"
 MODEL_CACHE_DIR = DATA_DIR / "models"
 
-for directory in [UPLOAD_DIR, DATA_DIR, VECTOR_DB_DIR, MODEL_CACHE_DIR]:
+RECORDS_DIR = DATA_DIR / "records"
+KNOWLEDGE_DATA_DIR = DATA_DIR / "knowledge"
+
+for directory in [UPLOAD_DIR, DATA_DIR, VECTOR_DB_DIR, MODEL_CACHE_DIR, RECORDS_DIR, KNOWLEDGE_DATA_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
