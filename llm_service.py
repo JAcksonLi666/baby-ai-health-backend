@@ -251,7 +251,7 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int = 2048
     ) -> Dict:
-        """调用云端 API 生成文本"""
+        """调用云端 API 生成文本（支持 OpenAI 兼容格式）"""
         if not self.cloud_api_key:
             logger.warning("未配置云端 API Key")
             return {
@@ -266,6 +266,20 @@ class LLMService:
                 "Content-Type": "application/json"
             }
             
+            # 根据 API 端点选择合适的模型和路径
+            if "tbox.cn" in self.cloud_api_base or "ant-ling.com" in self.cloud_api_base:
+                # 蚂蚁百灵 API（Ling-2.6-1T / Ling-2.6-flash）
+                api_url = f"{self.cloud_api_base.rstrip('/')}/chat/completions"
+                # 使用百灵支持的模型
+                if model == "deepseek-chat" or model == "auto":
+                    model = "Ling-2.6-1T"
+            elif self.cloud_api_base.endswith("/v1/") or self.cloud_api_base.endswith("/v1"):
+                # URL 已经包含 /v1/
+                api_url = f"{self.cloud_api_base.rstrip('/')}/chat/completions"
+            else:
+                # 标准 OpenAI 兼容格式 - 需要添加 v1 前缀
+                api_url = f"{self.cloud_api_base.rstrip('/')}/v1/chat/completions"
+            
             payload = {
                 "model": model,
                 "messages": [
@@ -275,16 +289,30 @@ class LLMService:
                 "max_tokens": max_tokens
             }
             
+            logger.info(f"调用云端 API: {api_url}, 模型: {model}")
             response = requests.post(
-                f"{self.cloud_api_base}/v1/chat/completions",
+                api_url,
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=120
             )
             
             if response.status_code == 200:
                 result = response.json()
-                content = result["choices"][0]["message"]["content"]
+                logger.info(f"云端 API 原始响应: {result}")
+                
+                # 支持 OpenAI 兼容格式: result["choices"][0]["message"]["content"]
+                # 也可能直接返回 result["response"] 或其他格式
+                if "choices" in result and len(result["choices"]) > 0:
+                    content = result["choices"][0]["message"]["content"]
+                elif "response" in result:
+                    content = result["response"]
+                elif "text" in result:
+                    content = result["text"]
+                else:
+                    # 尝试将整个结果转为字符串
+                    content = str(result)
+                
                 return {
                     "success": True,
                     "response": content,
@@ -302,6 +330,105 @@ class LLMService:
                 
         except Exception as e:
             logger.error(f"云端生成失败: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "source": "cloud"
+            }
+
+    def generate_cloud_stream(
+        self,
+        prompt: str,
+        model: str = "deepseek-chat",
+        temperature: float = 0.7,
+        max_tokens: int = 2048
+    ) -> Generator[str, None, Dict]:
+        """流式调用云端 API 生成文本（支持 OpenAI 兼容格式）"""
+        if not self.cloud_api_key:
+            logger.warning("未配置云端 API Key")
+            yield "错误: 未配置云端 API Key"
+            yield None
+            return {
+                "success": False,
+                "error": "未配置云端 API Key",
+                "source": "cloud"
+            }
+        
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.cloud_api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            if "tbox.cn" in self.cloud_api_base or "ant-ling.com" in self.cloud_api_base:
+                api_url = f"{self.cloud_api_base.rstrip('/')}/chat/completions"
+                if model == "deepseek-chat" or model == "auto":
+                    model = "Ling-2.6-1T"
+            elif self.cloud_api_base.endswith("/v1/") or self.cloud_api_base.endswith("/v1"):
+                api_url = f"{self.cloud_api_base.rstrip('/')}/chat/completions"
+            else:
+                api_url = f"{self.cloud_api_base.rstrip('/')}/v1/chat/completions"
+            
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True
+            }
+            
+            logger.info(f"调用云端流式 API: {api_url}, 模型: {model}")
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                stream=True,
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                full_response = ""
+                for line in response.iter_lines():
+                    if line:
+                        try:
+                            line_str = line.decode('utf-8')
+                            if line_str.startswith('data: '):
+                                data_str = line_str[6:]
+                                if data_str.strip() == '[DONE]':
+                                    break
+                                data = json.loads(data_str)
+                                if 'choices' in data and len(data['choices']) > 0:
+                                    token = data['choices'][0].get('delta', {}).get('content', '')
+                                    if token:
+                                        full_response += token
+                                        yield token
+                        except json.JSONDecodeError:
+                            continue
+                
+                yield None
+                
+                return {
+                    "success": True,
+                    "response": full_response,
+                    "model": model,
+                    "source": "cloud"
+                }
+            else:
+                logger.error(f"云端流式 API 请求失败: {response.status_code} - {response.text}")
+                yield f"错误: API 请求失败 ({response.status_code})"
+                yield None
+                return {
+                    "success": False,
+                    "error": f"API 请求失败: {response.status_code}",
+                    "source": "cloud"
+                }
+                
+        except Exception as e:
+            logger.error(f"云端流式生成失败: {str(e)}")
+            yield f"错误: {str(e)}"
+            yield None
             return {
                 "success": False,
                 "error": str(e),

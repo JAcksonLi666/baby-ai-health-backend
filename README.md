@@ -4,6 +4,7 @@
 
 ## 📋 功能特性
 
+### 核心功能
 - 📤 **OCR 识别**：支持图片和 PDF 的文字提取（PaddleOCR）
 - 🔍 **向量数据库**：ChromaDB 持久化存储健康档案
 - 🤖 **智能问答**：基于 RAG（Retrieval-Augmented Generation）的问答系统
@@ -11,6 +12,14 @@
 - 🔒 **隐私保护**：支持数据脱敏处理
 - 📊 **健康趋势分析**：基于历史数据的指标趋势分析
 - 📅 **日期自动识别**：从化验单自动提取日期信息
+
+### 新增功能 (v1.2.0)
+- 😴 **睡眠记录管理**：记录宝宝的入睡、醒来时间、睡眠质量
+- 💩 **排泄记录管理**：记录尿布类型、颜色、便便状态
+- 😭 **哭声记录管理**：记录哭闹类型、强度、持续时间和可能原因
+- 🌐 **双 AI 层架构**：本地 RAG 检索 + 云端大模型（蚂蚁·安诊儿）
+- 📚 **国家卫健委知识库**：内置婴幼儿照护指南知识库
+- 🔧 **流式输出支持**：云端和本地模型均支持流式输出
 
 ## 🛠️ 技术栈
 
@@ -31,8 +40,10 @@ backend/
 ├── models.py           # Pydantic 数据模型定义
 ├── ocr_service.py      # OCR 服务（图片/PDF文字提取）
 ├── vector_db.py        # ChromaDB 向量数据库操作
-├── llm_service.py      # 大语言模型服务（本地/Ollama）
+├── llm_service.py      # 大语言模型服务（本地/Ollama/云端）
 ├── rag_service.py      # RAG 问答服务（检索+生成）
+├── daily_records.py    # 日常记录服务（睡眠/排泄/哭声）
+├── knowledge_base.py   # 国家卫健委知识库服务
 ├── requirements.txt    # Python 依赖列表
 ├── .env.example        # 环境变量示例
 └── __pycache__/        # Python 编译缓存
@@ -92,6 +103,11 @@ PORT=8000
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:7b
 
+# 云端大模型配置（第二层AI分析 - 可选）
+# 推荐：蚂蚁·安诊儿（AntAngelMed）- 医疗专业大模型
+CLOUD_API_KEY=sk-studio-xxxxxxxxxxxx
+CLOUD_API_BASE=https://api.ant-ling.com/v1/
+
 # 存储配置
 UPLOAD_DIR=data/uploads
 VECTOR_DB_DIR=data/vector_db
@@ -103,6 +119,16 @@ MAX_UPLOAD_SIZE=10485760  # 10MB
 # 日志配置
 LOG_LEVEL=INFO
 ```
+
+### 云端大模型配置
+
+系统支持双 AI 层架构：
+1. **第一层（本地）**：使用 Ollama 本地模型进行 RAG 检索和初步回答
+2. **第二层（云端）**：可选使用云端大模型进行增强分析
+
+**推荐云端模型**：蚂蚁·安诊儿（Ling-2.6-1T）- 专为医疗健康场景优化
+
+申请地址：https://modelscope.cn/studios/MedAIBase/AntAngelMed
 
 ### 启动服务
 
@@ -169,13 +195,15 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 | 方法 | 路径 | 描述 |
 |------|------|------|
 | POST | /ask | 基于历史档案的智能问答 |
+| GET | /ask/stream | 基于历史档案的智能问答（流式） |
 
-**请求体：**
+**POST /ask 请求体：**
 ```json
 {
   "question": "宝宝最近的体重增长情况如何？",
   "top_k": 3,
-  "use_cloud": false
+  "use_cloud": true,
+  "model": "auto"
 }
 ```
 
@@ -185,10 +213,16 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
   "success": true,
   "answer": "根据历史记录分析...",
   "sources": [...],
-  "model_used": "qwen2.5:7b",
-  "cloud_used": false
+  "model_used": "Ling-2.6-1T",
+  "cloud_used": true
 }
 ```
+
+**参数说明：**
+- `question`: 必填，问题内容
+- `top_k`: 可选，检索的参考档案数量，默认 3
+- `use_cloud`: 可选，是否使用云端大模型，默认 false
+- `model`: 可选，本地模型名称，"auto" 表示自动选择，默认 "auto"
 
 ### 档案管理
 
@@ -224,6 +258,46 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 |------|------|------|
 | GET | /models | 获取可用的 AI 模型列表 |
 
+### 日常记录管理
+
+#### 睡眠记录
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/sleep | 获取睡眠记录列表 |
+| POST | /api/sleep | 创建睡眠记录 |
+| GET | /api/sleep/{id} | 获取单条睡眠记录 |
+| PUT | /api/sleep/{id} | 更新睡眠记录 |
+| DELETE | /api/sleep/{id} | 删除睡眠记录 |
+| GET | /api/sleep/ongoing | 获取进行中的睡眠 |
+
+#### 排泄记录
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/diaper | 获取排泄记录列表 |
+| POST | /api/diaper | 创建排泄记录 |
+| GET | /api/diaper/{id} | 获取单条排泄记录 |
+| PUT | /api/diaper/{id} | 更新排泄记录 |
+| DELETE | /api/diaper/{id} | 删除排泄记录 |
+
+#### 哭声记录
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/cry | 获取哭声记录列表 |
+| POST | /api/cry | 创建哭声记录 |
+| GET | /api/cry/{id} | 获取单条哭声记录 |
+| PUT | /api/cry/{id} | 更新哭声记录 |
+| DELETE | /api/cry/{id} | 删除哭声记录 |
+| GET | /api/cry/ongoing | 获取进行中的哭声 |
+| GET | /api/cry/analyze | AI 分析哭声原因 |
+
+### 仪表盘与知识库
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/today/summary | 获取今日汇总（睡眠/排泄/哭声） |
+| GET | /api/knowledge/search | 搜索国家卫健委知识库 |
+| GET | /api/knowledge/status | 获取知识库状态 |
+
 ## 🧩 核心模块
 
 ### 1. OCR 服务 (`ocr_service.py`)
@@ -250,9 +324,16 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ### 3. LLM 服务 (`llm_service.py`)
 
 - `generate_local()` - 使用 Ollama 本地模型生成
-- `generate_cloud()` - 使用云端 API 生成（预留）
+- `generate_local_stream()` - 使用 Ollama 本地模型流式生成
+- `generate_cloud()` - 使用云端 API 生成（非流式）
+- `generate_cloud_stream()` - 使用云端 API 流式生成
 - `check_ollama_health()` - 检查 Ollama 服务状态
 - `get_available_models()` - 获取可用模型列表
+
+**支持的云端 API：**
+- 蚂蚁·安诊儿（AntAngelMed）- 医疗专业大模型
+- DeepSeek
+- OpenAI 兼容格式
 
 ### 4. RAG 服务 (`rag_service.py`)
 
@@ -274,8 +355,22 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 4. **Ollama 服务**：启动后端前请确保 Ollama 服务正在运行
 5. **嵌入模型**：首次启动会自动检查/下载 nomic-embed-text 模型
 6. **版本兼容**：PaddlePaddle 3.x 与 PaddleOCR 2.x 不兼容，需使用 PaddlePaddle 2.6.2 + PaddleOCR 2.7.3
+7. **云端模型**：使用云端大模型需要在 `.env` 中配置 `CLOUD_API_KEY` 和 `CLOUD_API_BASE`
+8. **知识库**：国家卫健委婴幼儿照护指南知识库会在首次启动时自动加载
 
 ## 🔄 版本历史
+
+- **v1.2.0 (2026-05-19)** - 完整功能版本
+  - ✅ 添加睡眠记录管理功能（CRUD + 进行中状态）
+  - ✅ 添加排泄记录管理功能（CRUD）
+  - ✅ 添加哭声记录管理功能（CRUD + AI分析原因）
+  - ✅ 添加今日汇总仪表盘（睡眠/排泄/哭声数据概览）
+  - ✅ 配置云端大模型（蚂蚁·安诊儿 Ling-2.6-1T）
+  - ✅ 双 AI 层架构（本地 RAG + 云端大模型）
+  - ✅ 添加国家卫健委婴幼儿照护指南知识库
+  - ✅ 添加云端模型流式输出支持
+  - ✅ 修复流式输出时忽略 use_cloud 参数的问题
+  - ✅ 添加每日记录 API 端点
 
 - **v1.1.0 (2026-05-18)** - 功能增强版本
   - ✅ 添加档案更新接口（PUT /record/{id}）
