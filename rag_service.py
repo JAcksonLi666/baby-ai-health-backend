@@ -3,6 +3,7 @@ from typing import List, Dict, Generator
 from vector_db import vector_db_service
 from llm_service import llm_service
 from config import OLLAMA_MODEL, TAVILY_API_KEY
+from knowledge_base import knowledge_service
 import re
 import requests
 
@@ -73,6 +74,20 @@ class RAGService:
 
 """
 
+        # 知识库检索
+        try:
+            kb_result = knowledge_service.search(question, n_results=3)
+            if kb_result.get("results"):
+                user_prompt += "相关知识库参考：\n"
+                user_prompt += "-" * 50 + "\n"
+                for i, kb in enumerate(kb_result["results"][:3], 1):
+                    user_prompt += f"\n【知识 {i}】{kb['title']}\n"
+                    user_prompt += f"来源：{kb['source']}\n"
+                    user_prompt += f"内容：{kb['content']}\n"
+                user_prompt += "-" * 50 + "\n\n"
+        except Exception as e:
+            logger.warning(f"知识库检索失败: {e}")
+
         full_prompt = system_prompt + user_prompt
         logger.info(f"构建 Prompt 成功，上下文记录数: {len(context_records)}")
         return full_prompt
@@ -112,7 +127,8 @@ class RAGService:
                     ],
                     "model_used": llm_result.get("model", model or OLLAMA_MODEL),
                     "cloud_used": use_cloud,
-                    "context_count": len(context_records)
+                    "context_count": len(context_records),
+                    "kb_sources": kb_result.get("results", []) if 'kb_result' in dir() else [],
                 }
             else:
                 return {
