@@ -18,12 +18,14 @@ from models import (
     SleepRecordCreate, SleepRecordUpdate, SleepRecordResponse,
     DiaperRecordCreate, DiaperRecordUpdate, DiaperRecordResponse,
     CryRecordCreate, CryRecordUpdate, CryRecordResponse,
+    FeedingRecordCreate, FeedingRecordUpdate, FeedingRecordResponse,
+    GrowthRecordCreate, GrowthRecordUpdate, GrowthRecordResponse,
     TodaySummaryResponse,
 )
 from ocr_service import ocr_service
 from vector_db import vector_db_service
 from rag_service import rag_service
-from daily_records import sleep_service, diaper_service, cry_service
+from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service
 from knowledge_base import knowledge_service
 from growth_standards import get_growth_standard, calculate_percentile, AGE_GROUPS
 
@@ -861,6 +863,110 @@ async def delete_cry_record(record_id: str):
         return {"success": True, "message": "哭声记录已删除"}
     raise HTTPException(status_code=404, detail="哭声记录不存在")
 
+# --- 喂养记录 ---
+@app.post("/api/feeding", response_model=FeedingRecordResponse, tags=["日常记录-喂养"])
+async def create_feeding_record(data: FeedingRecordCreate):
+    try:
+        record = feeding_service.create(data.model_dump())
+        return record
+    except Exception as e:
+        logger.error(f"创建喂养记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/feeding", tags=["日常记录-喂养"])
+async def list_feeding_records(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    page: int = Query(None, ge=1),
+    page_size: int = Query(None, ge=1, le=200),
+    start_date: str = Query(None),
+    end_date: str = Query(None),
+):
+    try:
+        return feeding_service.list_records(
+            limit=limit, offset=offset, page=page, page_size=page_size,
+            start_date=start_date, end_date=end_date
+        )
+    except Exception as e:
+        logger.error(f"获取喂养记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/feeding/{record_id}", tags=["日常记录-喂养"])
+async def get_feeding_record(record_id: str):
+    record = feeding_service.get_by_id(record_id)
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="喂养记录不存在")
+
+@app.put("/api/feeding/{record_id}", tags=["日常记录-喂养"])
+async def update_feeding_record(record_id: str, data: FeedingRecordUpdate):
+    record = feeding_service.update(record_id, data.model_dump(exclude_none=True))
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="喂养记录不存在")
+
+@app.delete("/api/feeding/{record_id}", tags=["日常记录-喂养"])
+async def delete_feeding_record(record_id: str):
+    if feeding_service.delete(record_id):
+        return {"success": True, "message": "喂养记录已删除"}
+    raise HTTPException(status_code=404, detail="喂养记录不存在")
+
+# --- 生长发育记录 ---
+@app.post("/api/growth", response_model=GrowthRecordResponse, tags=["日常记录-生长发育"])
+async def create_growth_record(data: GrowthRecordCreate):
+    try:
+        record = growth_service.create(data.model_dump())
+        return record
+    except Exception as e:
+        logger.error(f"创建生长发育记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/growth", tags=["日常记录-生长发育"])
+async def list_growth_records(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    page: int = Query(None, ge=1),
+    page_size: int = Query(None, ge=1, le=200),
+    start_date: str = Query(None),
+    end_date: str = Query(None),
+):
+    try:
+        return growth_service.list_records(
+            limit=limit, offset=offset, page=page, page_size=page_size,
+            start_date=start_date, end_date=end_date
+        )
+    except Exception as e:
+        logger.error(f"获取生长发育记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/growth/latest", tags=["日常记录-生长发育"])
+async def get_latest_growth_record():
+    """获取最新的生长发育记录"""
+    record = growth_service.get_latest()
+    if record:
+        return {"success": True, "record": record}
+    return {"success": False, "message": "暂无生长发育记录"}
+
+@app.get("/api/growth/{record_id}", tags=["日常记录-生长发育"])
+async def get_growth_record(record_id: str):
+    record = growth_service.get_by_id(record_id)
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="生长发育记录不存在")
+
+@app.put("/api/growth/{record_id}", tags=["日常记录-生长发育"])
+async def update_growth_record(record_id: str, data: GrowthRecordUpdate):
+    record = growth_service.update(record_id, data.model_dump(exclude_none=True))
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="生长发育记录不存在")
+
+@app.delete("/api/growth/{record_id}", tags=["日常记录-生长发育"])
+async def delete_growth_record(record_id: str):
+    if growth_service.delete(record_id):
+        return {"success": True, "message": "生长发育记录已删除"}
+    raise HTTPException(status_code=404, detail="生长发育记录不存在")
+
 # --- 今日汇总 ---
 @app.get("/api/today/summary", tags=["日常记录"])
 async def get_today_summary():
@@ -950,6 +1056,32 @@ async def get_today_summary():
             "is_ongoing": cry_is_ongoing,
         }
 
+        # Feeding summary
+        feeding_records = feeding_service.get_today_records()
+        breast_count = sum(1 for r in feeding_records if r.get("feeding_type") == "breast")
+        formula_count = sum(1 for r in feeding_records if r.get("feeding_type") == "formula")
+        solid_count = sum(1 for r in feeding_records if r.get("feeding_type") == "solid")
+        water_count = sum(1 for r in feeding_records if r.get("feeding_type") == "water")
+        total_duration = sum(r.get("duration_minutes", 0) or 0 for r in feeding_records)
+        total_amount = sum(r.get("amount_ml", 0) or 0 for r in feeding_records)
+
+        feeding_summary = {
+            "total_count": len(feeding_records),
+            "breast_count": breast_count,
+            "formula_count": formula_count,
+            "solid_count": solid_count,
+            "water_count": water_count,
+            "total_duration_minutes": total_duration,
+            "total_amount_ml": total_amount,
+        }
+
+        # Growth summary
+        latest_growth = growth_service.get_latest()
+        growth_summary = {
+            "has_record": latest_growth is not None,
+            "latest_record": latest_growth,
+        }
+
         # Generate insights
         insights = []
         if total_minutes < 720:  # less than 12 hours
@@ -970,6 +1102,8 @@ async def get_today_summary():
             sleep=sleep_summary,
             diaper=diaper_summary,
             cry=cry_summary,
+            feeding=feeding_summary,
+            growth=growth_summary,
             insights=insights,
         )
     except Exception as e:

@@ -323,3 +323,47 @@ class CryRecordService(BaseRecordService):
 sleep_service = SleepRecordService()
 diaper_service = DiaperRecordService()
 cry_service = CryRecordService()
+
+
+class FeedingRecordService(BaseRecordService):
+    """喂养记录服务"""
+
+    def __init__(self):
+        super().__init__("feeding_records.json")
+        self.prefix = "feeding"
+
+    def get_today_records(self) -> List[Dict]:
+        today = date.today().isoformat()
+        return [r for r in self._read_all() if r.get("time", "").startswith(today)]
+
+    def _extract_date(self, record: Dict) -> Optional[str]:
+        return record.get("time", "")[:10] if record.get("time") else None
+
+
+class GrowthRecordService(BaseRecordService):
+    """生长发育记录服务"""
+
+    def __init__(self):
+        super().__init__("growth_records.json")
+        self.prefix = "growth"
+
+    def get_today_records(self) -> List[Dict]:
+        today = date.today().isoformat()
+        return [r for r in self._read_all() if r.get("record_date", "").startswith(today)]
+
+    def get_latest(self) -> Optional[Dict]:
+        """获取最新的一条生长发育记录"""
+        records = self._read_all()
+        if not records:
+            return None
+        # Sort by record_date descending
+        records.sort(key=lambda x: x.get("record_date", ""), reverse=True)
+        return records[0]
+
+    def _extract_date(self, record: Dict) -> Optional[str]:
+        return record.get("record_date", "") if record.get("record_date") else None
+
+
+# Module-level instances
+feeding_service = FeedingRecordService()
+growth_service = GrowthRecordService()
