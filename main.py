@@ -25,6 +25,7 @@ from vector_db import vector_db_service
 from rag_service import rag_service
 from daily_records import sleep_service, diaper_service, cry_service
 from knowledge_base import knowledge_service
+from growth_standards import get_growth_standard, calculate_percentile, AGE_GROUPS
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
@@ -990,6 +991,142 @@ async def search_knowledge(
 @app.get("/api/knowledge/status", tags=["知识库"])
 async def knowledge_status():
     return knowledge_service.get_status()
+
+
+# ==================== 生长发育 API ====================
+
+@app.get("/api/growth/standards", tags=["生长发育"])
+async def get_growth_standards(
+    gender: str = Query(..., description="性别: boys/girls"),
+    metric: str = Query(..., description="指标: weight/height/bmi/head_circumference"),
+    age_months: int = Query(..., ge=0, le=144, description="月龄"),
+):
+    """获取指定年龄的生长标准值"""
+    try:
+        # 验证参数
+        if gender not in ["boys", "girls"]:
+            raise HTTPException(status_code=400, detail="性别参数必须是 boys 或 girls")
+        
+        valid_metrics = ["weight", "height", "bmi", "head_circumference"]
+        if metric not in valid_metrics:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"指标参数必须是以下之一: {', '.join(valid_metrics)}"
+            )
+        
+        standard = get_growth_standard(gender, metric, age_months)
+        if not standard:
+            raise HTTPException(status_code=404, detail="未找到该年龄段的生长标准")
+        
+        return {
+            "success": True,
+            "gender": gender,
+            "metric": metric,
+            "age_months": age_months,
+            "standards": standard,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取生长标准失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+
+@app.get("/api/growth/percentile", tags=["生长发育"])
+async def calculate_growth_percentile(
+    value: float = Query(..., description="测量值"),
+    gender: str = Query(..., description="性别: boys/girls"),
+    metric: str = Query(..., description="指标: weight/height/bmi"),
+    age_months: int = Query(..., ge=0, le=144, description="月龄"),
+):
+    """计算生长指标百分位"""
+    try:
+        # 验证参数
+        if gender not in ["boys", "girls"]:
+            raise HTTPException(status_code=400, detail="性别参数必须是 boys 或 girls")
+        
+        valid_metrics = ["weight", "height", "bmi"]
+        if metric not in valid_metrics:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"指标参数必须是以下之一: {', '.join(valid_metrics)}"
+            )
+        
+        percentile = calculate_percentile(value, gender, metric, age_months)
+        if percentile is None:
+            raise HTTPException(status_code=404, detail="无法计算百分位")
+        
+        return {
+            "success": True,
+            "value": value,
+            "gender": gender,
+            "metric": metric,
+            "age_months": age_months,
+            "percentile": round(percentile, 1),
+            "evaluation": _evaluate_percentile(percentile),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"计算百分位失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+
+def _evaluate_percentile(percentile: float) -> str:
+    """评估百分位"""
+    if percentile < 3:
+        return "偏低"
+    elif percentile < 25:
+        return "偏矮/偏轻"
+    elif percentile < 75:
+        return "正常"
+    elif percentile < 97:
+        return "偏高/偏重"
+    else:
+        return "高/重"
+
+
+@app.get("/api/growth/age-groups", tags=["生长发育"])
+async def get_age_groups():
+    """获取年龄段定义"""
+    return {
+        "success": True,
+        "age_groups": AGE_GROUPS,
+    }
+
+
+@app.get("/api/growth/metrics", tags=["生长发育"])
+async def get_available_metrics():
+    """获取可用的生长指标"""
+    return {
+        "success": True,
+        "metrics": {
+            "weight": {
+                "name": "体重",
+                "unit": "kg",
+                "description": "儿童体重",
+                "age_range": "0-144个月",
+            },
+            "height": {
+                "name": "身高",
+                "unit": "cm",
+                "description": "儿童身高/身长",
+                "age_range": "0-144个月",
+            },
+            "bmi": {
+                "name": "BMI",
+                "unit": "kg/m²",
+                "description": "身体质量指数",
+                "age_range": "24-144个月",
+            },
+            "head_circumference": {
+                "name": "头围",
+                "unit": "cm",
+                "description": "头部周长",
+                "age_range": "0-24个月",
+            },
+        },
+    }
 
 
 if __name__ == "__main__":
