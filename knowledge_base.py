@@ -436,9 +436,9 @@ class KnowledgeBaseService:
             KNOWLEDGE_DATA_DIR.mkdir(parents=True, exist_ok=True)
             with open(KB_PKL_PATH, "wb") as f:
                 pickle.dump({"version": 1, "count": len(self.entries), "index": self.bm25_index}, f)
-            logger.info(f"BM25 index built and cached ({len(self.entries)} entries)")
+            logger.info(f"BM25 索引已构建并缓存 ({len(self.entries)} 条)")
         except ImportError:
-            logger.warning("rank_bm25 or jieba not installed, BM25 search unavailable")
+            logger.warning("rank_bm25 或 jieba 未安装，BM25 搜索不可用")
             self.bm25_index = None
 
     def _rebuild_index(self):
