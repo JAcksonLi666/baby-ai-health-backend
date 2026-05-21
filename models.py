@@ -274,3 +274,55 @@ class GrowthRecordResponse(BaseModel):
     notes: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+# ==================== 提醒记录模型 ====================
+
+class ReminderType(str, Enum):
+    vaccine = "vaccine"       # 疫苗接种
+    checkup = "checkup"       # 体检
+    feeding = "feeding"       # 喂养提醒
+    medicine = "medicine"     # 用药提醒
+    other = "other"           # 其他
+
+class ReminderStatus(str, Enum):
+    pending = "pending"       # 待处理
+    completed = "completed"   # 已完成
+    overdue = "overdue"       # 已过期
+    cancelled = "cancelled"   # 已取消
+
+class RepeatType(str, Enum):
+    none = "none"             # 不重复
+    daily = "daily"           # 每天
+    weekly = "weekly"         # 每周
+    monthly = "monthly"       # 每月
+
+class ReminderRecordCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200, description="提醒标题")
+    reminder_type: ReminderType
+    reminder_date: str = Field(..., description="提醒日期 YYYY-MM-DD")
+    reminder_time: Optional[str] = Field(None, description="提醒时间 HH:mm")
+    repeat_type: RepeatType = RepeatType.none
+    notes: Optional[str] = None
+    status: ReminderStatus = ReminderStatus.pending
+
+class ReminderRecordUpdate(BaseModel):
+    title: Optional[str] = None
+    reminder_type: Optional[ReminderType] = None
+    reminder_date: Optional[str] = None
+    reminder_time: Optional[str] = None
+    repeat_type: Optional[RepeatType] = None
+    notes: Optional[str] = None
+    status: Optional[ReminderStatus] = None
+
+class ReminderRecordResponse(BaseModel):
+    id: str
+    title: str
+    reminder_type: str
+    reminder_date: str
+    reminder_time: Optional[str] = None
+    repeat_type: str
+    status: str
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
