@@ -1,6 +1,6 @@
 # 宝宝健康档案 AI 助手 - 后端服务
 
-基于 Python FastAPI 构建的婴幼儿健康档案管理后端服务，提供 OCR 识别、向量数据库存储和智能问答功能。
+基于 Python FastAPI 构建的婴幼儿健康档案管理后端服务，提供 OCR 识别、向量数据库存储、智能问答、症状自查、化验单解析等功能。
 
 ## 📋 功能特性
 
@@ -13,13 +13,31 @@
 - 📊 **健康趋势分析**：基于历史数据的指标趋势分析
 - 📅 **日期自动识别**：从化验单自动提取日期信息
 
-### 新增功能 (v1.2.0)
+### v1.2.0 新增
 - 😴 **睡眠记录管理**：记录宝宝的入睡、醒来时间、睡眠质量
 - 💩 **排泄记录管理**：记录尿布类型、颜色、便便状态
 - 😭 **哭声记录管理**：记录哭闹类型、强度、持续时间和可能原因
 - 🌐 **双 AI 层架构**：本地 RAG 检索 + 云端大模型（蚂蚁·安诊儿）
 - 📚 **国家卫健委知识库**：内置婴幼儿照护指南知识库
 - 🔧 **流式输出支持**：云端和本地模型均支持流式输出
+
+### v1.3.0 新增
+- 🍼 **喂养记录管理**：记录母乳/配方奶/辅食/喝水，支持哺乳侧和奶量
+- 📏 **生长发育记录**：记录体重、身高、头围、体温
+- 📈 **WHO 生长曲线**：内置 WHO 标准生长数据，支持百分位计算
+- 📊 **今日汇总仪表盘**：睡眠/排泄/哭声/喂养/生长发育数据概览 + AI 洞察
+- 📚 **知识库动态管理**：支持知识条目的增删查
+- 🐳 **Docker 部署**：提供 Dockerfile 和 docker-compose 配置
+- 📱 **PWA 支持**：Service Worker + manifest.json
+
+### v1.4.0 新增
+- 🧪 **化验单 AI 解析**：LLM 智能解析化验单文本，提取结构化指标数据
+- 📋 **化验单智能评估**：根据年龄段参考范围自动评估指标状态（正常/偏低/偏高/危急）
+- 🩺 **症状自查**：8 大类 40+ 症状选择，AI 分析可能原因并给出注意事项
+- 💬 **对话历史管理**：AI 问答会话持久化存储，支持查看历史对话
+- 🔍 **混合检索**：BM25 + 向量相似度混合搜索知识库
+- 🚀 **性能优化**：预计算 embedding 缓存、线程安全文件锁、async 非阻塞 LLM 调用
+- 🌍 **枚举校验**：ReportType / MessageRole 等枚举类型确保 API 参数安全
 
 ## 🛠️ 技术栈
 
@@ -35,18 +53,24 @@
 
 ```
 backend/
-├── main.py             # FastAPI 应用入口，定义 API 路由
-├── config.py           # 配置管理（环境变量、路径、参数）
-├── models.py           # Pydantic 数据模型定义
-├── ocr_service.py      # OCR 服务（图片/PDF文字提取）
-├── vector_db.py        # ChromaDB 向量数据库操作
-├── llm_service.py      # 大语言模型服务（本地/Ollama/云端）
-├── rag_service.py      # RAG 问答服务（检索+生成）
-├── daily_records.py    # 日常记录服务（睡眠/排泄/哭声）
-├── knowledge_base.py   # 国家卫健委知识库服务
-├── requirements.txt    # Python 依赖列表
-├── .env.example        # 环境变量示例
-└── __pycache__/        # Python 编译缓存
+├── main.py                 # FastAPI 应用入口，定义所有 API 路由
+├── config.py               # 配置管理（环境变量、路径、参数）
+├── models.py               # Pydantic 数据模型定义（含枚举校验）
+├── ocr_service.py          # OCR 服务（图片/PDF 文字提取）
+├── vector_db.py            # ChromaDB 向量数据库操作
+├── llm_service.py          # 大语言模型服务（本地/Ollama/云端）
+├── rag_service.py          # RAG 问答服务（检索+生成）
+├── daily_records.py        # 日常记录服务（睡眠/排泄/哭声/喂养/生长发育）
+├── knowledge_base.py       # 知识库服务（BM25 + 向量混合检索）
+├── growth_standards.py     # WHO 生长发育标准数据与百分位计算
+├── lab_report_parser.py    # 化验单 AI 解析服务（v1.4.0）
+├── symptom_checker.py      # 症状自查服务（v1.4.0）
+├── chat_history.py         # 对话历史服务（v1.4.0）
+├── desensitization.py      # 数据脱敏处理
+├── requirements.txt        # Python 依赖列表
+├── .env.example            # 环境变量示例
+├── Dockerfile              # Docker 镜像配置
+└── __pycache__/            # Python 编译缓存
 ```
 
 ## 🚀 快速开始
@@ -156,39 +180,12 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 | 方法 | 路径 | 描述 |
 |------|------|------|
 | POST | /upload | 上传化验单图片或 PDF |
+| POST | /upload/preview | 预览识别结果（不保存到数据库） |
 
 **请求参数：**
 - `file`: UploadFile - 化验单文件
 - `record_date`: str (可选) - 记录日期 YYYY-MM-DD
 - `record_type`: str (可选) - 记录类型: blood_test, urine_test, general, other
-
-**响应示例：**
-```json
-{
-  "success": true,
-  "file_id": "20240101120000_abc12345",
-  "filename": "20240101120000_abc12345.jpg",
-  "message": "上传成功，已完成 OCR 识别和向量化存储",
-  "extracted_text": "...",
-  "record_date": "2024-01-01",
-  "record_type": "blood_test"
-}
-```
-
-### 预识别（仅识别不上传）
-
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| POST | /preview | 预览识别结果（不保存到数据库） |
-
-**响应示例：**
-```json
-{
-  "success": true,
-  "extracted_text": "...",
-  "detected_date": "2024-01-01"
-}
-```
 
 ### 智能问答
 
@@ -207,44 +204,16 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 }
 ```
 
-**响应示例：**
-```json
-{
-  "success": true,
-  "answer": "根据历史记录分析...",
-  "sources": [...],
-  "model_used": "Ling-2.6-1T",
-  "cloud_used": true
-}
-```
-
-**参数说明：**
-- `question`: 必填，问题内容
-- `top_k`: 可选，检索的参考档案数量，默认 3
-- `use_cloud`: 可选，是否使用云端大模型，默认 false
-- `model`: 可选，本地模型名称，"auto" 表示自动选择，默认 "auto"
-
 ### 档案管理
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | /records | 获取所有档案列表（支持筛选） |
+| GET | /records | 获取所有档案列表 |
+| GET | /records/filter | 按类型/日期/关键词筛选档案 |
+| GET | /records/types | 获取所有记录类型统计 |
 | GET | /record/{record_id} | 获取指定档案详情 |
-| PUT | /record/{record_id} | 更新档案信息（日期、类型） |
+| PUT | /record/{record_id} | 更新档案信息 |
 | DELETE | /record/{record_id} | 删除指定档案 |
-
-**GET /records 查询参数：**
-- `record_type`: str (可选) - 按类型筛选
-- `start_date`: str (可选) - 开始日期 YYYY-MM-DD
-- `end_date`: str (可选) - 结束日期 YYYY-MM-DD
-
-**PUT /record/{record_id} 请求体：**
-```json
-{
-  "record_date": "2024-01-15",
-  "record_type": "general"
-}
-```
 
 ### 健康分析
 
@@ -258,6 +227,13 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 |------|------|------|
 | GET | /models | 获取可用的 AI 模型列表 |
 
+### 联网搜索
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /search/online | 使用 Tavily 进行联网搜索 |
+| GET | /search/status | 获取联网搜索功能状态 |
+
 ### 日常记录管理
 
 #### 睡眠记录
@@ -265,10 +241,10 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 |------|------|------|
 | GET | /api/sleep | 获取睡眠记录列表 |
 | POST | /api/sleep | 创建睡眠记录 |
+| GET | /api/sleep/ongoing | 获取进行中的睡眠 |
 | GET | /api/sleep/{id} | 获取单条睡眠记录 |
 | PUT | /api/sleep/{id} | 更新睡眠记录 |
 | DELETE | /api/sleep/{id} | 删除睡眠记录 |
-| GET | /api/sleep/ongoing | 获取进行中的睡眠 |
 
 #### 排泄记录
 | 方法 | 路径 | 描述 |
@@ -284,19 +260,97 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 |------|------|------|
 | GET | /api/cry | 获取哭声记录列表 |
 | POST | /api/cry | 创建哭声记录 |
+| GET | /api/cry/ongoing | 获取进行中的哭闹 |
+| GET | /api/cry/analyze | AI 分析哭声原因 |
 | GET | /api/cry/{id} | 获取单条哭声记录 |
 | PUT | /api/cry/{id} | 更新哭声记录 |
 | DELETE | /api/cry/{id} | 删除哭声记录 |
-| GET | /api/cry/ongoing | 获取进行中的哭声 |
-| GET | /api/cry/analyze | AI 分析哭声原因 |
+
+#### 喂养记录 (v1.3.0)
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/feeding | 获取喂养记录列表 |
+| POST | /api/feeding | 创建喂养记录（母乳/配方奶/辅食/喝水） |
+| GET | /api/feeding/{id} | 获取单条喂养记录 |
+| PUT | /api/feeding/{id} | 更新喂养记录 |
+| DELETE | /api/feeding/{id} | 删除喂养记录 |
+
+#### 生长发育记录 (v1.3.0)
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/growth | 获取生长发育记录列表 |
+| POST | /api/growth | 创建生长发育记录（体重/身高/头围/体温） |
+| GET | /api/growth/latest | 获取最新生长发育记录 |
+| GET | /api/growth/{id} | 获取单条生长发育记录 |
+| PUT | /api/growth/{id} | 更新生长发育记录 |
+| DELETE | /api/growth/{id} | 删除生长发育记录 |
+
+#### 生长发育标准 (v1.3.0)
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/growth/standards | 获取指定年龄的 WHO 生长标准值 |
+| GET | /api/growth/percentile | 计算生长指标百分位 |
+| GET | /api/growth/age-groups | 获取年龄段定义 |
+| GET | /api/growth/metrics | 获取可用的生长指标列表 |
 
 ### 仪表盘与知识库
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | /api/today/summary | 获取今日汇总（睡眠/排泄/哭声） |
-| GET | /api/knowledge/search | 搜索国家卫健委知识库 |
+| GET | /api/today/summary | 获取今日汇总（睡眠/排泄/哭声/喂养/生长发育 + AI 洞察） |
+| GET | /api/knowledge/search | 搜索知识库（BM25 + 向量混合检索） |
 | GET | /api/knowledge/status | 获取知识库状态 |
+| GET | /api/knowledge/list | 列出知识库条目（支持分类过滤） |
+| GET | /api/knowledge/{entry_id} | 获取单条知识条目 |
+| POST | /api/knowledge | 添加知识条目 |
+| DELETE | /api/knowledge/{entry_id} | 删除知识条目 |
+
+### AI - 化验单解析 (v1.4.0)
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | /api/lab-report/parse | 使用 LLM 将化验单文本解析为结构化 JSON |
+| POST | /api/lab-report/evaluate | 解析并评估化验单指标（根据年龄段参考范围） |
+
+**POST /api/lab-report/evaluate 请求体：**
+```json
+{
+  "report_type": "blood_routine",
+  "month_age": 6,
+  "indicators": [
+    {"name": "白细胞", "value": "8.5", "unit": "10^9/L"},
+    {"name": "血红蛋白", "value": "120", "unit": "g/L"}
+  ]
+}
+```
+
+### AI - 症状自查 (v1.4.0)
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | /api/symptom/analyze | 分析婴幼儿症状，返回分类、可能原因和注意事项 |
+| GET | /api/symptom/categories | 获取所有可用症状分类及症状列表 |
+
+**POST /api/symptom/analyze 请求体：**
+```json
+{
+  "symptoms": [
+    {"key": "cough", "category": "呼吸系统", "name": "咳嗽"},
+    {"key": "fever", "category": "发热", "name": "发热"}
+  ],
+  "month_age": 6
+}
+```
+
+### AI - 对话历史 (v1.4.0)
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | /api/chat/sessions | 创建新对话会话 |
+| GET | /api/chat/sessions | 列出所有对话会话 |
+| GET | /api/chat/sessions/{session_id}/messages | 获取会话消息历史 |
+| POST | /api/chat/sessions/{session_id}/messages | 向会话添加消息 |
+| DELETE | /api/chat/sessions/{session_id} | 删除对话会话及其所有消息 |
 
 ## 🧩 核心模块
 
@@ -315,6 +369,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `get_record()` - 获取单条记录
 - `delete_record()` - 删除记录
 - `update_record()` - 更新记录信息
+- `generate_embedding()` - 生成文本嵌入向量
 
 **嵌入模型支持（自动选择）**：
 1. 优先使用 Ollama nomic-embed-text（推荐）
@@ -329,6 +384,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `generate_cloud_stream()` - 使用云端 API 流式生成
 - `check_ollama_health()` - 检查 Ollama 服务状态
 - `get_available_models()` - 获取可用模型列表
+- `select_smartest_model()` - 自动选择最优模型
 
 **支持的云端 API：**
 - 蚂蚁·安诊儿（AntAngelMed）- 医疗专业大模型
@@ -340,6 +396,36 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `build_medical_prompt()` - 构建医疗问答 Prompt
 - `answer_question()` - 基于 RAG 回答问题
 - `analyze_health_trend()` - 分析健康指标趋势
+
+### 5. 知识库服务 (`knowledge_base.py`)
+
+- `search()` - 搜索知识库（BM25 + 向量混合检索）
+- `hybrid_search()` - 混合检索（BM25 文本匹配 + 向量相似度）
+- `vector_search()` - 纯向量检索（带预计算缓存）
+- `get_entry()` / `add_entry()` / `delete_entry()` - 知识条目 CRUD
+- `_precompute_embeddings()` - 预计算所有条目的嵌入向量
+
+### 6. 化验单解析服务 (`lab_report_parser.py`) - v1.4.0
+
+- `parse_with_llm()` - 使用 LLM 解析化验单文本
+- `evaluate_indicators()` - 根据年龄段参考范围评估指标
+- `_parse_via_llm()` - LLM 解析实现（async 非阻塞）
+- `_parse_via_regex()` - 正则表达式回退解析
+
+### 7. 症状自查服务 (`symptom_checker.py`) - v1.4.0
+
+- `analyze_symptoms()` - 分析症状，返回分类和可能原因
+- `get_categories()` - 获取所有症状分类定义
+- `_search_knowledge()` - 检索相关知识库条目
+
+### 8. 对话历史服务 (`chat_history.py`) - v1.4.0
+
+- `create_session()` - 创建新对话会话
+- `add_message()` - 添加消息（线程安全）
+- `get_session_history()` - 获取会话消息历史
+- `list_sessions()` - 列出所有会话
+- `delete_session()` - 删除会话
+- `get_context_messages()` - 获取 LLM 上下文格式消息
 
 ## 📖 API 文档
 
@@ -357,8 +443,34 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 6. **版本兼容**：PaddlePaddle 3.x 与 PaddleOCR 2.x 不兼容，需使用 PaddlePaddle 2.6.2 + PaddleOCR 2.7.3
 7. **云端模型**：使用云端大模型需要在 `.env` 中配置 `CLOUD_API_KEY` 和 `CLOUD_API_BASE`
 8. **知识库**：国家卫健委婴幼儿照护指南知识库会在首次启动时自动加载
+9. **线程安全**：对话历史和知识库操作使用文件锁保护，支持并发访问
+10. **症状自查**：本工具仅提供症状分类参考，不构成就医建议
 
 ## 🔄 版本历史
+
+- **v1.4.0 (2026-05-21)** - AI 增强版本
+  - ✅ 化验单 AI 智能解析（LLM + 正则回退）
+  - ✅ 化验单指标评估（年龄特异性参考范围）
+  - ✅ 症状自查功能（8 大类 40+ 症状）
+  - ✅ 对话历史管理（会话持久化存储）
+  - ✅ 知识库混合检索（BM25 + 向量相似度）
+  - ✅ 预计算 embedding 缓存优化
+  - ✅ 线程安全文件锁（chat_history / knowledge_base）
+  - ✅ async 非阻塞 LLM 调用
+  - ✅ ReportType / MessageRole 枚举校验
+  - ✅ 前端国际化完善（LabReportParser / SymptomChecker / ChatHistory）
+  - ✅ 移动端响应式设计优化
+
+- **v1.3.0 (2026-05-20)** - 成长管理版本
+  - ✅ 添加喂养记录管理功能（母乳/配方奶/辅食/喝水）
+  - ✅ 添加生长发育记录功能（体重/身高/头围/体温）
+  - ✅ 添加 WHO 生长曲线标准数据
+  - ✅ 添加生长指标百分位计算
+  - ✅ 今日汇总仪表盘集成喂养和生长发育数据
+  - ✅ 知识库动态管理（增删查）
+  - ✅ Docker 部署配置（Dockerfile + docker-compose）
+  - ✅ PWA 支持（manifest.json + Service Worker）
+  - ✅ 代码优化：moment.js 替换为 dayjs、EventSource 泄漏修复等
 
 - **v1.2.0 (2026-05-19)** - 完整功能版本
   - ✅ 添加睡眠记录管理功能（CRUD + 进行中状态）
