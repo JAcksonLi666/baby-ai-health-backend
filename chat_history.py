@@ -5,6 +5,7 @@ Provides session management and message history for AI chat interactions.
 import json
 from datetime import datetime
 from typing import List, Dict, Optional
+from threading import Lock
 
 from daily_records import BaseRecordService
 from config import RECORDS_DIR
@@ -15,11 +16,13 @@ class ChatHistoryService(BaseRecordService):
 
     Inherits from BaseRecordService to reuse JSON file storage and basic CRUD.
     Each session contains a list of messages (user/assistant/system).
+    Thread-safe operations using file locking to prevent race conditions.
     """
 
     def __init__(self):
         super().__init__("chat_history.json")
         self.prefix = "chat"
+        self._lock = Lock()  # Thread-safe lock for concurrent access
 
     def create_session(self, title: Optional[str] = None) -> Dict:
         """Create a new chat session.
@@ -30,20 +33,21 @@ class ChatHistoryService(BaseRecordService):
         Returns:
             The created session dictionary.
         """
-        now = datetime.now().isoformat()
-        session_id = self._generate_id("session")
-        session = {
-            "id": session_id,
-            "title": title or "New Chat",
-            "messages": [],
-            "message_count": 0,
-            "created_at": now,
-            "updated_at": now,
-        }
-        records = self._read_all()
-        records.append(session)
-        self._write_all(records)
-        return session
+        with self._lock:
+            now = datetime.now().isoformat()
+            session_id = self._generate_id("session")
+            session = {
+                "id": session_id,
+                "title": title or "New Chat",
+                "messages": [],
+                "message_count": 0,
+                "created_at": now,
+                "updated_at": now,
+            }
+            records = self._read_all()
+            records.append(session)
+            self._write_all(records)
+            return session
 
     def add_message(
         self, session_id: str, role: str, content: str
@@ -63,31 +67,32 @@ class ChatHistoryService(BaseRecordService):
         if role not in valid_roles:
             raise ValueError(f"Invalid role '{role}'. Must be one of: {valid_roles}")
 
-        records = self._read_all()
-        for session in records:
-            if session["id"] == session_id:
-                now = datetime.now().isoformat()
-                message = {
-                    "id": self._generate_id("msg"),
-                    "role": role,
-                    "content": content,
-                    "created_at": now,
-                }
-                session["messages"].append(message)
-                session["message_count"] = len(session["messages"])
-                session["updated_at"] = now
+        with self._lock:
+            records = self._read_all()
+            for session in records:
+                if session["id"] == session_id:
+                    now = datetime.now().isoformat()
+                    message = {
+                        "id": self._generate_id("msg"),
+                        "role": role,
+                        "content": content,
+                        "created_at": now,
+                    }
+                    session["messages"].append(message)
+                    session["message_count"] = len(session["messages"])
+                    session["updated_at"] = now
 
-                # Auto-generate title from first user message
-                if (
-                    session["title"] == "New Chat"
-                    and role == "user"
-                    and len(session["messages"]) == 1
-                ):
-                    session["title"] = content[:50] + ("..." if len(content) > 50 else "")
+                    # Auto-generate title from first user message
+                    if (
+                        session["title"] == "New Chat"
+                        and role == "user"
+                        and len(session["messages"]) == 1
+                    ):
+                        session["title"] = content[:50] + ("..." if len(content) > 50 else "")
 
-                self._write_all(records)
-                return session
-        return None
+                    self._write_all(records)
+                    return session
+            return None
 
     def get_session_history(
         self, session_id: str, limit: int = 20
@@ -149,12 +154,13 @@ class ChatHistoryService(BaseRecordService):
         Returns:
             True if deleted, False if not found.
         """
-        records = self._read_all()
-        new_records = [r for r in records if r["id"] != session_id]
-        if len(new_records) < len(records):
-            self._write_all(new_records)
-            return True
-        return False
+        with self._lock:
+            records = self._read_all()
+            new_records = [r for r in records if r["id"] != session_id]
+            if len(new_records) < len(records):
+                self._write_all(new_records)
+                return True
+            return False
 
     def get_context_messages(
         self, session_id: str, max_messages: int = 10

@@ -704,15 +704,18 @@ class LabReportParser:
         Returns:
             dict with keys: report_type, items (list of indicator dicts)
         """
-        if not text or not text.strip():
-            return {"report_type": report_type, "items": []}
+        import asyncio
 
-        # Auto-detect report type
+        # Auto-detect report type if not specified
         if report_type == "auto":
-            report_type = detect_report_type(text)
+            report_type = self.detect_report_type(text)
+            logger.info(f"Auto-detected report type: {report_type}")
 
-        # Try LLM parsing first
-        llm_available = llm_service.check_ollama_health()
+        # Check if Ollama is available (run in thread pool to avoid blocking)
+        try:
+            llm_available = await asyncio.to_thread(llm_service.check_ollama_health)
+        except Exception:
+            llm_available = False
 
         if llm_available:
             try:
@@ -725,13 +728,15 @@ class LabReportParser:
             except Exception as e:
                 logger.error(f"LLM parsing failed: {str(e)}, falling back to regex")
         else:
-            logger.info("LLM unavailable, using regex fallback")
+            logger.warning("Ollama not available, using regex parsing")
 
         # Fallback to regex parsing
-        return _parse_with_regex(text, report_type)
+        return self._parse_with_regex(text, report_type)
 
     async def _parse_via_llm(self, text: str, report_type: str) -> Optional[dict]:
         """Internal method to call LLM for structured parsing."""
+        import asyncio
+
         indicator_hints = _build_indicator_hints(report_type)
         prompt = LLM_PARSE_PROMPT_TEMPLATE.format(
             report_type=report_type,
@@ -740,8 +745,10 @@ class LabReportParser:
         )
 
         # Use local LLM with low temperature for structured output
+        # Run in thread pool to avoid blocking the event loop
         model = llm_service.select_smartest_model()
-        result = llm_service.generate_local(
+        result = await asyncio.to_thread(
+            llm_service.generate_local,
             prompt=prompt,
             model=model,
             temperature=0.1,

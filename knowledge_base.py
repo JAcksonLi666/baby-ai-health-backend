@@ -1,6 +1,6 @@
 """
 知识库服务 - 国家卫健委婴幼儿照护指南
-BM25 + 关键词混合检索
+BM25 + 向量 + 关键词混合检索
 """
 import json
 import os
@@ -9,6 +9,14 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime
+from threading import Lock
+
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
 
 from config import KNOWLEDGE_DATA_DIR
 
@@ -396,7 +404,11 @@ class KnowledgeBaseService:
     def __init__(self):
         self.entries = list(KNOWLEDGE_ENTRIES)
         self.bm25_index = None
+        self._entry_embeddings: Dict[str, List[float]] = {}  # Cache for vector embeddings
+        self._embeddings_lock = Lock()  # Thread-safe lock for embeddings
+        self._entries_lock = Lock()  # Thread-safe lock for entries modification
         self._load_or_build_index()
+        self._precompute_embeddings()  # Pre-compute embeddings for all entries
 
     def _load_or_build_index(self):
         if KB_PKL_PATH.exists():
@@ -424,9 +436,9 @@ class KnowledgeBaseService:
             KNOWLEDGE_DATA_DIR.mkdir(parents=True, exist_ok=True)
             with open(KB_PKL_PATH, "wb") as f:
                 pickle.dump({"version": 1, "count": len(self.entries), "index": self.bm25_index}, f)
-            logger.info(f"BM25 索引已构建并缓存 ({len(self.entries)} 条)")
+            logger.info(f"BM25 index built and cached ({len(self.entries)} entries)")
         except ImportError:
-            logger.warning("rank_bm25 或 jieba 未安装，BM25 搜索不可用")
+            logger.warning("rank_bm25 or jieba not installed, BM25 search unavailable")
             self.bm25_index = None
 
     def _rebuild_index(self):
@@ -437,6 +449,26 @@ class KnowledgeBaseService:
             except Exception:
                 pass
         self._build_index()
+        # Also rebuild embeddings cache
+        self._precompute_embeddings()
+
+    def _precompute_embeddings(self):
+        """Pre-compute embeddings for all entries to avoid real-time computation."""
+        try:
+            from vector_db import vector_db_service
+
+            with self._embeddings_lock:
+                self._entry_embeddings = {}
+                for entry in self.entries:
+                    text = f"{entry['title']} {entry['content']}"
+                    embedding = vector_db_service.generate_embedding(text)
+                    if embedding and not all(v == 0.0 for v in embedding):
+                        self._entry_embeddings[entry['id']] = embedding
+
+            logger.info(f"Pre-computed embeddings for {len(self._entry_embeddings)} entries")
+        except Exception as e:
+            logger.warning(f"Failed to pre-compute embeddings: {e}")
+            self._entry_embeddings = {}
 
     def search(self, query: str, n_results: int = 3) -> Dict:
         results = []
@@ -493,46 +525,60 @@ class KnowledgeBaseService:
         }
 
     def vector_search(self, query: str, top_k: int = 5) -> List[Dict]:
-        """Semantic search using vector database.
+        """Semantic search using pre-computed embeddings.
 
-        Uses the existing vector_db_service for embedding-based retrieval.
+        Uses cached embeddings for fast similarity computation.
         Falls back to BM25 search if vector database is not available.
         """
         try:
             from vector_db import vector_db_service
 
-            # Build query text combining title and content from all entries
-            # and search against the vector DB for semantic matches
+            # Generate query embedding (only once per search)
             query_embedding = vector_db_service.generate_embedding(query)
             if not query_embedding or all(v == 0.0 for v in query_embedding):
                 logger.warning("Vector embedding is zero, falling back to BM25")
                 return self._bm25_fallback(query, top_k)
 
-            # Build a combined text for each entry and compute similarity
-            import numpy as np
+            if not HAS_NUMPY:
+                logger.warning("numpy not available, falling back to BM25")
+                return self._bm25_fallback(query, top_k)
+
+            # Use pre-computed embeddings for fast similarity computation
+            with self._embeddings_lock:
+                cached_embeddings = dict(self._entry_embeddings)
+
+            if not cached_embeddings:
+                logger.warning("No cached embeddings available, falling back to BM25")
+                return self._bm25_fallback(query, top_k)
+
+            # Compute cosine similarity using numpy
+            vec_a = np.array(query_embedding)
+            norm_a = np.linalg.norm(vec_a)
+
             results = []
             for entry in self.entries:
-                text = f"{entry['title']} {entry['content']}"
-                entry_embedding = vector_db_service.generate_embedding(text)
-                if entry_embedding and len(entry_embedding) == len(query_embedding):
-                    # Cosine similarity
-                    vec_a = np.array(query_embedding)
-                    vec_b = np.array(entry_embedding)
-                    norm_a = np.linalg.norm(vec_a)
-                    norm_b = np.linalg.norm(vec_b)
-                    if norm_a > 0 and norm_b > 0:
-                        similarity = float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
-                    else:
-                        similarity = 0.0
-                    results.append({
-                        "id": entry["id"],
-                        "title": entry["title"],
-                        "source": entry["source"],
-                        "content": entry["content"][:300] + "...",
-                        "keywords": entry.get("keywords", []),
-                        "score": similarity,
-                        "match_type": "vector",
-                    })
+                entry_id = entry["id"]
+                if entry_id not in cached_embeddings:
+                    continue
+
+                entry_embedding = cached_embeddings[entry_id]
+                vec_b = np.array(entry_embedding)
+                norm_b = np.linalg.norm(vec_b)
+
+                if norm_a > 0 and norm_b > 0:
+                    similarity = float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
+                else:
+                    similarity = 0.0
+
+                results.append({
+                    "id": entry["id"],
+                    "title": entry["title"],
+                    "source": entry["source"],
+                    "content": entry["content"][:300] + "...",
+                    "keywords": entry.get("keywords", []),
+                    "score": similarity,
+                    "match_type": "vector",
+                })
 
             results.sort(key=lambda x: x["score"], reverse=True)
             return results[:top_k]
@@ -588,12 +634,16 @@ class KnowledgeBaseService:
                 merged[eid]["vector_score"] = max(merged[eid].get("vector_score", 0), r.get("score", 0))
 
         # Compute combined score (weighted average: 0.4 BM25 + 0.6 vector)
+        # Normalize scores using max score in current batch (min-max normalization)
+        max_bm25 = max([merged[eid].get("bm25_score", 0) for eid in merged] or [1.0])
+        max_vector = max([merged[eid].get("vector_score", 0) for eid in merged] or [1.0])
+
         for eid in merged:
             bm25 = merged[eid].get("bm25_score", 0)
             vec = merged[eid].get("vector_score", 0)
-            # Normalize BM25 score to 0-1 range
-            bm25_norm = min(float(bm25) / 2.0, 1.0) if bm25 > 0 else 0
-            vec_norm = float(vec) if vec > 0 else 0
+            # Min-max normalization to 0-1 range
+            bm25_norm = float(bm25) / max_bm25 if max_bm25 > 0 else 0
+            vec_norm = float(vec) / max_vector if max_vector > 0 else 0
             combined = 0.4 * bm25_norm + 0.6 * vec_norm
             merged[eid]["score"] = combined
             merged[eid]["match_type"] = "hybrid"
@@ -604,18 +654,36 @@ class KnowledgeBaseService:
 
     # ==================== Dynamic management methods ====================
 
+    def _get_category_from_id(self, entry_id: str) -> str:
+        """Infer category from entry ID prefix."""
+        prefix_map = {
+            "kb_feed": "feeding",
+            "kb_sleep": "sleep",
+            "kb_diaper": "diaper",
+            "kb_cry": "cry",
+            "kb_health": "health",
+            "kb_vaccine": "vaccine",
+            "kb_illness": "illness",
+            "kb_nutrition": "nutrition",
+            "kb_safety": "safety",
+        }
+        for prefix, cat in prefix_map.items():
+            if entry_id.startswith(prefix):
+                return cat
+        return "other"
+
     def list_entries(self, category: Optional[str] = None) -> List[Dict]:
         """List all knowledge entries, optionally filtered by category."""
         entries = self.entries
         if category:
-            entries = [e for e in entries if e.get("category") == category]
+            entries = [e for e in entries if self._get_category_from_id(e["id"]) == category]
         return [
             {
                 "id": e["id"],
                 "title": e["title"],
                 "source": e.get("source", ""),
                 "keywords": e.get("keywords", []),
-                "category": e.get("category", ""),
+                "category": self._get_category_from_id(e["id"]),
             }
             for e in entries
         ]
