@@ -364,6 +364,28 @@ class GrowthRecordService(BaseRecordService):
         return record.get("record_date", "") if record.get("record_date") else None
 
 
+class ReminderRecordService(BaseRecordService):
+    """提醒记录服务"""
+
+    def __init__(self):
+        super().__init__("reminder_records.json")
+        self.prefix = "reminder"
+
+    def get_pending(self) -> List[Dict]:
+        """获取待处理的提醒"""
+        records = self._read_all()
+        return [r for r in records if r.get("status") == "pending"]
+
+    def get_today_reminders(self) -> List[Dict]:
+        """获取今天的提醒"""
+        today = date.today().isoformat()
+        return [r for r in self._read_all() if r.get("reminder_date", "").startswith(today)]
+
+    def _extract_date(self, record: Dict) -> Optional[str]:
+        return record.get("reminder_date", "") if record.get("reminder_date") else None
+
+
 # Module-level instances
 feeding_service = FeedingRecordService()
 growth_service = GrowthRecordService()
+reminder_service = ReminderRecordService()

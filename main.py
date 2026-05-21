@@ -20,12 +20,13 @@ from models import (
     CryRecordCreate, CryRecordUpdate, CryRecordResponse,
     FeedingRecordCreate, FeedingRecordUpdate, FeedingRecordResponse,
     GrowthRecordCreate, GrowthRecordUpdate, GrowthRecordResponse,
+    ReminderRecordCreate, ReminderRecordUpdate, ReminderRecordResponse,
     TodaySummaryResponse,
 )
 from ocr_service import ocr_service
 from vector_db import vector_db_service
 from rag_service import rag_service
-from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service
+from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service, reminder_service
 from knowledge_base import knowledge_service
 from growth_standards import get_growth_standard, calculate_percentile, AGE_GROUPS
 
@@ -966,6 +967,64 @@ async def delete_growth_record(record_id: str):
     if growth_service.delete(record_id):
         return {"success": True, "message": "生长发育记录已删除"}
     raise HTTPException(status_code=404, detail="生长发育记录不存在")
+
+# --- 提醒记录 ---
+@app.post("/api/reminder", response_model=ReminderRecordResponse, tags=["日常记录-提醒"])
+async def create_reminder_record(data: ReminderRecordCreate):
+    try:
+        record = reminder_service.create(data.model_dump())
+        return record
+    except Exception as e:
+        logger.error(f"创建提醒记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/reminder", tags=["日常记录-提醒"])
+async def list_reminder_records(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    page: int = Query(None, ge=1),
+    page_size: int = Query(None, ge=1, le=200),
+    status: str = Query(None),
+):
+    try:
+        return reminder_service.list_records(
+            limit=limit, offset=offset, page=page, page_size=page_size
+        )
+    except Exception as e:
+        logger.error(f"获取提醒记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/reminder/pending", tags=["日常记录-提醒"])
+async def get_pending_reminders():
+    """获取待处理的提醒"""
+    records = reminder_service.get_pending()
+    return {"success": True, "records": records, "total": len(records)}
+
+@app.get("/api/reminder/today", tags=["日常记录-提醒"])
+async def get_today_reminders():
+    """获取今天的提醒"""
+    records = reminder_service.get_today_reminders()
+    return {"success": True, "records": records, "total": len(records)}
+
+@app.get("/api/reminder/{record_id}", tags=["日常记录-提醒"])
+async def get_reminder_record(record_id: str):
+    record = reminder_service.get_by_id(record_id)
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="提醒记录不存在")
+
+@app.put("/api/reminder/{record_id}", tags=["日常记录-提醒"])
+async def update_reminder_record(record_id: str, data: ReminderRecordUpdate):
+    record = reminder_service.update(record_id, data.model_dump(exclude_none=True))
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="提醒记录不存在")
+
+@app.delete("/api/reminder/{record_id}", tags=["日常记录-提醒"])
+async def delete_reminder_record(record_id: str):
+    if reminder_service.delete(record_id):
+        return {"success": True, "message": "提醒记录已删除"}
+    raise HTTPException(status_code=404, detail="提醒记录不存在")
 
 # --- 今日汇总 ---
 @app.get("/api/today/summary", tags=["日常记录"])
