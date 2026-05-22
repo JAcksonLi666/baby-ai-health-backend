@@ -29,16 +29,9 @@ from models import (
 from ocr_service import ocr_service
 from vector_db import vector_db_service
 from rag_service import rag_service
-<<<<<<< HEAD
-from daily_records import sleep_service, diaper_service, cry_service
-from knowledge_base import knowledge_service
-=======
 from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service, reminder_service
 from knowledge_base import knowledge_service
 from growth_standards import get_growth_standard, calculate_percentile, AGE_GROUPS
-<<<<<<< HEAD
->>>>>>> 0b42d387ce810b1a07a25d1f665f973531817435
-=======
 from lab_report_parser import lab_report_parser
 from symptom_checker import symptom_checker
 from chat_history import chat_history_service
@@ -47,7 +40,6 @@ from models import (
     ChatSessionCreate, ChatMessageCreate, ChatSessionResponse,
     KnowledgeEntryCreate,
 )
->>>>>>> babAIHealthBackend/main
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
