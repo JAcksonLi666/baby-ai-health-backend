@@ -194,4 +194,135 @@ class TodaySummaryResponse(BaseModel):
     sleep: dict
     diaper: dict
     cry: dict
+    feeding: Optional[dict] = None
+    growth: Optional[dict] = None
     insights: Optional[List[str]] = None
+
+
+# ==================== 喂养记录模型 ====================
+
+class FeedingType(str, Enum):
+    breast = "breast"           # 母乳
+    formula = "formula"        # 配方奶
+    solid = "solid"            # 辅食
+    water = "water"            # 喝水
+
+class BreastSide(str, Enum):
+    left = "left"
+    right = "right"
+    both = "both"
+
+class FeedingRecordCreate(BaseModel):
+    time: str = Field(..., description="喂养时间 YYYY-MM-DD HH:mm")
+    feeding_type: FeedingType
+    duration_minutes: Optional[int] = Field(None, ge=0, description="喂养时长(分钟)")
+    amount_ml: Optional[float] = Field(None, ge=0, description="奶量(ml)")
+    breast_side: Optional[BreastSide] = None
+    solid_food: Optional[str] = Field(None, description="辅食名称")
+    water_amount_ml: Optional[float] = Field(None, ge=0, description="喝水量(ml)")
+    notes: Optional[str] = None
+
+class FeedingRecordUpdate(BaseModel):
+    time: Optional[str] = None
+    feeding_type: Optional[FeedingType] = None
+    duration_minutes: Optional[int] = None
+    amount_ml: Optional[float] = None
+    breast_side: Optional[BreastSide] = None
+    solid_food: Optional[str] = None
+    water_amount_ml: Optional[float] = None
+    notes: Optional[str] = None
+
+class FeedingRecordResponse(BaseModel):
+    id: str
+    time: str
+    feeding_type: str
+    duration_minutes: Optional[int] = None
+    amount_ml: Optional[float] = None
+    breast_side: Optional[str] = None
+    solid_food: Optional[str] = None
+    water_amount_ml: Optional[float] = None
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+# ==================== 生长发育记录模型 ====================
+
+class GrowthRecordCreate(BaseModel):
+    record_date: str = Field(..., description="记录日期 YYYY-MM-DD")
+    weight_kg: Optional[float] = Field(None, ge=0, le=150, description="体重(kg)")
+    height_cm: Optional[float] = Field(None, ge=0, le=250, description="身高/身长(cm)")
+    head_circumference_cm: Optional[float] = Field(None, ge=0, le=70, description="头围(cm)")
+    temperature_c: Optional[float] = Field(None, ge=35, le=42, description="体温(°C)")
+    notes: Optional[str] = None
+
+class GrowthRecordUpdate(BaseModel):
+    record_date: Optional[str] = None
+    weight_kg: Optional[float] = None
+    height_cm: Optional[float] = None
+    head_circumference_cm: Optional[float] = None
+    temperature_c: Optional[float] = None
+    notes: Optional[str] = None
+
+class GrowthRecordResponse(BaseModel):
+    id: str
+    record_date: str
+    weight_kg: Optional[float] = None
+    height_cm: Optional[float] = None
+    head_circumference_cm: Optional[float] = None
+    temperature_c: Optional[float] = None
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+# ==================== 提醒记录模型 ====================
+
+class ReminderType(str, Enum):
+    vaccine = "vaccine"       # 疫苗接种
+    checkup = "checkup"       # 体检
+    feeding = "feeding"       # 喂养提醒
+    medicine = "medicine"     # 用药提醒
+    other = "other"           # 其他
+
+class ReminderStatus(str, Enum):
+    pending = "pending"       # 待处理
+    completed = "completed"   # 已完成
+    overdue = "overdue"       # 已过期
+    cancelled = "cancelled"   # 已取消
+
+class RepeatType(str, Enum):
+    none = "none"             # 不重复
+    daily = "daily"           # 每天
+    weekly = "weekly"         # 每周
+    monthly = "monthly"       # 每月
+
+class ReminderRecordCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200, description="提醒标题")
+    reminder_type: ReminderType
+    reminder_date: str = Field(..., description="提醒日期 YYYY-MM-DD")
+    reminder_time: Optional[str] = Field(None, description="提醒时间 HH:mm")
+    repeat_type: RepeatType = RepeatType.none
+    notes: Optional[str] = None
+    status: ReminderStatus = ReminderStatus.pending
+
+class ReminderRecordUpdate(BaseModel):
+    title: Optional[str] = None
+    reminder_type: Optional[ReminderType] = None
+    reminder_date: Optional[str] = None
+    reminder_time: Optional[str] = None
+    repeat_type: Optional[RepeatType] = None
+    notes: Optional[str] = None
+    status: Optional[ReminderStatus] = None
+
+class ReminderRecordResponse(BaseModel):
+    id: str
+    title: str
+    reminder_type: str
+    reminder_date: str
+    reminder_time: Optional[str] = None
+    repeat_type: str
+    status: str
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

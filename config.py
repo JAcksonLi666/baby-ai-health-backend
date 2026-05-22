@@ -32,3 +32,5 @@ MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf', '.bmp', '.tiff'}
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "")

@@ -18,18 +18,34 @@ try:
     import pytesseract
     from PIL import Image, ImageEnhance
     
-    # 设置 Tesseract 路径（Windows）
-    tesseract_paths = [
-        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
-        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
-        r'C:\Users\A\AppData\Local\Tesseract-OCR\tesseract.exe'
-    ]
-    
-    for path in tesseract_paths:
-        if os.path.exists(path):
-            pytesseract.pytesseract.tesseract_cmd = path
-            logger.info(f"Tesseract 路径已设置: {path}")
-            break
+    # 设置 Tesseract 路径（优先使用环境变量，其次自动检测）
+    from config import TESSERACT_CMD
+
+    tesseract_cmd = TESSERACT_CMD
+    if tesseract_cmd and os.path.exists(tesseract_cmd):
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+        logger.info(f"Tesseract 路径已从环境变量加载: {tesseract_cmd}")
+    else:
+        # 自动检测常见安装路径
+        common_paths = []
+        if os.name == 'nt':  # Windows
+            common_paths = [
+                r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+                r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+            ]
+            # 尝试从 PATH 或注册表查找
+            import shutil
+            which_result = shutil.which('tesseract')
+            if which_result:
+                common_paths.insert(0, which_result)
+        else:  # Linux / macOS
+            common_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
+
+        for path in common_paths:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                logger.info(f"Tesseract 路径已自动检测: {path}")
+                break
     
     TESSERACT_AVAILABLE = True
 except ImportError:
