@@ -274,3 +274,145 @@ class GrowthRecordResponse(BaseModel):
     notes: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+# ==================== 提醒记录模型 ====================
+
+class ReminderType(str, Enum):
+    vaccine = "vaccine"       # 疫苗接种
+    checkup = "checkup"       # 体检
+    feeding = "feeding"       # 喂养提醒
+    medicine = "medicine"     # 用药提醒
+    other = "other"           # 其他
+
+class ReminderStatus(str, Enum):
+    pending = "pending"       # 待处理
+    completed = "completed"   # 已完成
+    overdue = "overdue"       # 已过期
+    cancelled = "cancelled"   # 已取消
+
+class RepeatType(str, Enum):
+    none = "none"             # 不重复
+    daily = "daily"           # 每天
+    weekly = "weekly"         # 每周
+    monthly = "monthly"       # 每月
+
+class ReminderRecordCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200, description="提醒标题")
+    reminder_type: ReminderType
+    reminder_date: str = Field(..., description="提醒日期 YYYY-MM-DD")
+    reminder_time: Optional[str] = Field(None, description="提醒时间 HH:mm")
+    repeat_type: RepeatType = RepeatType.none
+    notes: Optional[str] = None
+    status: ReminderStatus = ReminderStatus.pending
+
+class ReminderRecordUpdate(BaseModel):
+    title: Optional[str] = None
+    reminder_type: Optional[ReminderType] = None
+    reminder_date: Optional[str] = None
+    reminder_time: Optional[str] = None
+    repeat_type: Optional[RepeatType] = None
+    notes: Optional[str] = None
+    status: Optional[ReminderStatus] = None
+
+class ReminderRecordResponse(BaseModel):
+    id: str
+    title: str
+    reminder_type: str
+    reminder_date: str
+    reminder_time: Optional[str] = None
+    repeat_type: str
+    status: str
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+# ==================== Lab Report Parser Models ====================
+
+class ReportType(str, Enum):
+    """Enum for lab report types."""
+    auto = "auto"
+    blood = "blood"
+    urine = "urine"
+    liver = "liver"
+    kidney = "kidney"
+    blood_routine = "blood_routine"
+    urine_routine = "urine_routine"
+    liver_function = "liver_function"
+    kidney_function = "kidney_function"
+
+class LabReportParseRequest(BaseModel):
+    """Request model for lab report parsing."""
+    text: str = Field(..., description="OCR extracted text from lab report")
+    report_type: ReportType = Field(default=ReportType.auto, description="Report type: auto/blood/urine/liver/kidney")
+    age_months: int = Field(default=6, ge=0, le=144, description="Patient age in months")
+
+
+class LabReportItem(BaseModel):
+    """Single lab report indicator item."""
+    name: str
+    value: Optional[float] = None
+    unit: Optional[str] = None
+    reference_range: Optional[str] = None
+    status: str = Field(default="normal", description="normal/low/high/critical")
+
+
+class LabReportResponse(BaseModel):
+    """Response model for lab report parsing and evaluation."""
+    report_type: str
+    items: List[LabReportItem] = []
+    summary: str = ""
+    abnormal_count: int = 0
+    total_count: int = 0
+
+
+# ==================== Symptom Checker Models ====================
+
+class SymptomCheckRequest(BaseModel):
+    symptoms: List[str] = Field(..., description="List of symptom names")
+    age_months: int = Field(..., ge=0, le=144, description="Baby's age in months")
+    duration_days: Optional[int] = Field(None, ge=0, description="Duration of symptoms in days")
+    severity: Optional[int] = Field(None, ge=1, le=5, description="User-reported severity 1-5")
+
+class SymptomAnalysis(BaseModel):
+    category: str
+    description: str
+    possible_causes: List[str]
+    severity: str
+    related_knowledge: List[str]
+    precautions: List[str]
+
+
+# ==================== Chat History Models ====================
+
+class MessageRole(str, Enum):
+    """Enum for chat message roles."""
+    user = "user"
+    assistant = "assistant"
+    system = "system"
+
+class ChatSessionCreate(BaseModel):
+    title: Optional[str] = None
+
+class ChatMessageCreate(BaseModel):
+    session_id: str
+    role: MessageRole = Field(..., description="Message role: user/assistant/system")
+    content: str
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    title: str
+    message_count: int
+    created_at: str
+    updated_at: str
+
+
+# ==================== Knowledge Base Models ====================
+
+class KnowledgeEntryCreate(BaseModel):
+    title: str
+    content: str
+    source: Optional[str] = None
+    keywords: List[str] = []
+    category: Optional[str] = None

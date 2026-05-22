@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
@@ -8,9 +8,11 @@ import uuid
 import os
 import json
 import re
+import time
 from pathlib import Path
 from datetime import datetime, date
 import shutil
+from typing import Dict
 
 from config import UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_EXTENSIONS, LOG_LEVEL
 from models import UploadResponse, AskRequest, AskResponse, ErrorResponse
@@ -20,14 +22,24 @@ from models import (
     CryRecordCreate, CryRecordUpdate, CryRecordResponse,
     FeedingRecordCreate, FeedingRecordUpdate, FeedingRecordResponse,
     GrowthRecordCreate, GrowthRecordUpdate, GrowthRecordResponse,
+    ReminderRecordCreate, ReminderRecordUpdate, ReminderRecordResponse,
     TodaySummaryResponse,
+    LabReportParseRequest, LabReportResponse,
 )
 from ocr_service import ocr_service
 from vector_db import vector_db_service
 from rag_service import rag_service
-from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service
+from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service, reminder_service
 from knowledge_base import knowledge_service
 from growth_standards import get_growth_standard, calculate_percentile, AGE_GROUPS
+from lab_report_parser import lab_report_parser
+from symptom_checker import symptom_checker
+from chat_history import chat_history_service
+from models import (
+    SymptomCheckRequest, SymptomAnalysis,
+    ChatSessionCreate, ChatMessageCreate, ChatSessionResponse,
+    KnowledgeEntryCreate,
+)
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
@@ -35,7 +47,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-VERSION = "1.1.0"
+VERSION = "1.4.0"
 
 
 @asynccontextmanager
@@ -73,6 +85,45 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==================== Rate Limiter ====================
+_rate_limit_store: Dict[str, list] = {}  # {client_ip: [timestamp, ...]}
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_MAX_REQUESTS = 60  # per window per IP
+_RATE_LIMIT_AI_MAX = 10  # per window for AI endpoints
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Simple in-memory rate limiter."""
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    # Determine limit based on endpoint
+    path = request.url.path
+    if any(ai_path in path for ai_path in ["/ask", "/api/lab-report", "/api/symptom", "/api/chat"]):
+        max_requests = _RATE_LIMIT_AI_MAX
+    else:
+        max_requests = _RATE_LIMIT_MAX_REQUESTS
+
+    # Clean old entries and check
+    if client_ip not in _rate_limit_store:
+        _rate_limit_store[client_ip] = []
+
+    # Remove timestamps outside the window
+    _rate_limit_store[client_ip] = [
+        t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW
+    ]
+
+    if len(_rate_limit_store[client_ip]) >= max_requests:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "请求过于频繁，请稍后再试"}
+        )
+
+    _rate_limit_store[client_ip].append(now)
+    response = await call_next(request)
+    return response
 
 
 @app.exception_handler(Exception)
@@ -967,6 +1018,64 @@ async def delete_growth_record(record_id: str):
         return {"success": True, "message": "生长发育记录已删除"}
     raise HTTPException(status_code=404, detail="生长发育记录不存在")
 
+# --- 提醒记录 ---
+@app.post("/api/reminder", response_model=ReminderRecordResponse, tags=["日常记录-提醒"])
+async def create_reminder_record(data: ReminderRecordCreate):
+    try:
+        record = reminder_service.create(data.model_dump())
+        return record
+    except Exception as e:
+        logger.error(f"创建提醒记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/reminder", tags=["日常记录-提醒"])
+async def list_reminder_records(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    page: int = Query(None, ge=1),
+    page_size: int = Query(None, ge=1, le=200),
+    status: str = Query(None),
+):
+    try:
+        return reminder_service.list_records(
+            limit=limit, offset=offset, page=page, page_size=page_size
+        )
+    except Exception as e:
+        logger.error(f"获取提醒记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+@app.get("/api/reminder/pending", tags=["日常记录-提醒"])
+async def get_pending_reminders():
+    """获取待处理的提醒"""
+    records = reminder_service.get_pending()
+    return {"success": True, "records": records, "total": len(records)}
+
+@app.get("/api/reminder/today", tags=["日常记录-提醒"])
+async def get_today_reminders():
+    """获取今天的提醒"""
+    records = reminder_service.get_today_reminders()
+    return {"success": True, "records": records, "total": len(records)}
+
+@app.get("/api/reminder/{record_id}", tags=["日常记录-提醒"])
+async def get_reminder_record(record_id: str):
+    record = reminder_service.get_by_id(record_id)
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="提醒记录不存在")
+
+@app.put("/api/reminder/{record_id}", tags=["日常记录-提醒"])
+async def update_reminder_record(record_id: str, data: ReminderRecordUpdate):
+    record = reminder_service.update(record_id, data.model_dump(exclude_none=True))
+    if record:
+        return record
+    raise HTTPException(status_code=404, detail="提醒记录不存在")
+
+@app.delete("/api/reminder/{record_id}", tags=["日常记录-提醒"])
+async def delete_reminder_record(record_id: str):
+    if reminder_service.delete(record_id):
+        return {"success": True, "message": "提醒记录已删除"}
+    raise HTTPException(status_code=404, detail="提醒记录不存在")
+
 # --- 今日汇总 ---
 @app.get("/api/today/summary", tags=["日常记录"])
 async def get_today_summary():
@@ -1127,6 +1236,71 @@ async def knowledge_status():
     return knowledge_service.get_status()
 
 
+# --- Knowledge Base Dynamic Management ---
+@app.get("/api/knowledge/list", tags=["Knowledge Base"])
+async def list_knowledge_entries(category: str = Query(None, description="按分类过滤")):
+    """List knowledge base entries, optionally filtered by category."""
+    try:
+        entries = knowledge_service.list_entries(category=category)
+        return {
+            "success": True,
+            "entries": entries,
+            "total": len(entries),
+        }
+    except Exception as e:
+        logger.error(f"List knowledge entries failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+
+@app.get("/api/knowledge/{entry_id}", tags=["Knowledge Base"])
+async def get_knowledge_entry(entry_id: str):
+    """Get a single knowledge entry by id."""
+    entry = knowledge_service.get_entry(entry_id)
+    if entry:
+        return {
+            "success": True,
+            "entry": entry,
+        }
+    raise HTTPException(status_code=404, detail="知识条目不存在")
+
+
+@app.post("/api/knowledge", tags=["Knowledge Base"])
+async def add_knowledge_entry(data: KnowledgeEntryCreate):
+    """Add a new knowledge entry to the knowledge base."""
+    try:
+        import uuid
+        entry_id = f"kb_custom_{uuid.uuid4().hex[:8]}"
+        entry = knowledge_service.add_entry({
+            "id": entry_id,
+            "title": data.title,
+            "content": data.content,
+            "source": data.source or "",
+            "keywords": data.keywords,
+            "category": data.category or "",
+        })
+        return {
+            "success": True,
+            "entry": entry,
+            "message": f"知识条目 {entry_id} 已添加",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Add knowledge entry failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务内部错误，请稍后重试")
+
+
+@app.delete("/api/knowledge/{entry_id}", tags=["Knowledge Base"])
+async def delete_knowledge_entry(entry_id: str):
+    """Delete a knowledge entry by id."""
+    if knowledge_service.delete_entry(entry_id):
+        return {
+            "success": True,
+            "message": f"知识条目 {entry_id} 已删除",
+        }
+    raise HTTPException(status_code=404, detail="知识条目不存在")
+
+
 # ==================== 生长发育 API ====================
 
 @app.get("/api/growth/standards", tags=["生长发育"])
@@ -1261,6 +1435,204 @@ async def get_available_metrics():
             },
         },
     }
+
+
+# ==================== Lab Report Parser API ====================
+
+@app.post("/api/lab-report/parse", response_model=LabReportResponse, tags=["AI - Lab Report"])
+async def parse_lab_report(data: LabReportParseRequest):
+    """Parse lab report OCR text into structured JSON using LLM or regex fallback."""
+    try:
+        parsed = await lab_report_parser.parse_with_llm(
+            text=data.text,
+            report_type=data.report_type,
+        )
+        # Return basic parsed result without evaluation
+        items = []
+        for item in parsed.get("items", []):
+            items.append({
+                "name": item.get("name", ""),
+                "value": item.get("value"),
+                "unit": item.get("unit", ""),
+                "reference_range": item.get("reference", ""),
+                "status": item.get("status", "normal"),
+            })
+        return LabReportResponse(
+            report_type=parsed.get("report_type", "unknown"),
+            items=items,
+            summary="Parsed successfully. Use /api/lab-report/evaluate for clinical evaluation.",
+            abnormal_count=0,
+            total_count=len(items),
+        )
+    except Exception as e:
+        logger.error(f"Lab report parsing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+@app.post("/api/lab-report/evaluate", response_model=LabReportResponse, tags=["AI - Lab Report"])
+async def evaluate_lab_report(data: LabReportParseRequest):
+    """Parse lab report and evaluate results against age-specific reference ranges."""
+    try:
+        # Step 1: Parse the OCR text
+        parsed = await lab_report_parser.parse_with_llm(
+            text=data.text,
+            report_type=data.report_type,
+        )
+        # Step 2: Evaluate against reference ranges
+        evaluated = lab_report_parser.evaluate_results(
+            parsed_data=parsed,
+            age_months=data.age_months,
+        )
+        # Build response
+        items = []
+        for item in evaluated.get("items", []):
+            items.append({
+                "name": item.get("name", ""),
+                "value": item.get("value"),
+                "unit": item.get("unit", ""),
+                "reference_range": item.get("reference_range", ""),
+                "status": item.get("status", "normal"),
+            })
+        return LabReportResponse(
+            report_type=evaluated.get("report_type", "unknown"),
+            items=items,
+            summary=evaluated.get("summary", ""),
+            abnormal_count=evaluated.get("abnormal_count", 0),
+            total_count=evaluated.get("total_count", 0),
+        )
+    except Exception as e:
+        logger.error(f"Lab report evaluation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+# ==================== Symptom Checker API ====================
+
+@app.post("/api/symptom/analyze", tags=["AI - Symptom Checker"])
+async def analyze_symptoms(data: SymptomCheckRequest):
+    """Analyze infant/toddler symptoms and return classification with related knowledge.
+
+    This endpoint does NOT provide medical advice. It only classifies symptoms
+    and retrieves relevant knowledge base entries for reference.
+    """
+    if not data.symptoms:
+        raise HTTPException(status_code=400, detail="Symptoms list cannot be empty")
+    try:
+        result = await symptom_checker.analyze_symptoms(
+            symptoms=data.symptoms,
+            age_months=data.age_months,
+            duration_days=data.duration_days,
+            severity=data.severity,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Symptom analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+@app.get("/api/symptom/categories", tags=["AI - Symptom Checker"])
+async def get_symptom_categories():
+    """Get all available symptom categories and their symptoms."""
+    try:
+        categories = symptom_checker.get_all_categories()
+        return {
+            "success": True,
+            "categories": categories,
+            "total_categories": len(categories),
+        }
+    except Exception as e:
+        logger.error(f"Get symptom categories failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+# ==================== Chat History API ====================
+
+@app.post("/api/chat/sessions", tags=["AI - Chat History"])
+async def create_chat_session(data: ChatSessionCreate):
+    """Create a new chat session."""
+    try:
+        session = chat_history_service.create_session(title=data.title)
+        return session
+    except Exception as e:
+        logger.error(f"Create chat session failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+@app.get("/api/chat/sessions", tags=["AI - Chat History"])
+async def list_chat_sessions(
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List all chat sessions, sorted by most recently updated."""
+    try:
+        sessions = chat_history_service.list_sessions(limit=limit)
+        return {
+            "success": True,
+            "sessions": sessions,
+            "total": len(sessions),
+        }
+    except Exception as e:
+        logger.error(f"List chat sessions failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+@app.get("/api/chat/sessions/{session_id}/messages", tags=["AI - Chat History"])
+async def get_chat_messages(
+    session_id: str,
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Get message history for a chat session."""
+    try:
+        session = chat_history_service.get_session_history(session_id, limit=limit)
+        if session:
+            return {
+                "success": True,
+                "session": session,
+            }
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get chat messages failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+@app.post("/api/chat/sessions/{session_id}/messages", tags=["AI - Chat History"])
+async def add_chat_message(session_id: str, data: ChatMessageCreate):
+    """Add a message to a chat session."""
+    if data.session_id != session_id:
+        raise HTTPException(status_code=400, detail="Session ID in path and body must match")
+    try:
+        session = chat_history_service.add_message(
+            session_id=data.session_id,
+            role=data.role,
+            content=data.content,
+        )
+        if session:
+            return {
+                "success": True,
+                "session": session,
+            }
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Add chat message failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
+
+
+@app.delete("/api/chat/sessions/{session_id}", tags=["AI - Chat History"])
+async def delete_chat_session(session_id: str):
+    """Delete a chat session and all its messages."""
+    try:
+        if chat_history_service.delete_session(session_id):
+            return {"success": True, "message": "Chat session deleted"}
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete chat session failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Service internal error, please try again later")
 
 
 if __name__ == "__main__":
