@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
@@ -8,9 +8,11 @@ import uuid
 import os
 import json
 import re
+import time
 from pathlib import Path
 from datetime import datetime, date
 import shutil
+from typing import Dict
 
 from config import UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_EXTENSIONS, LOG_LEVEL
 from models import UploadResponse, AskRequest, AskResponse, ErrorResponse
@@ -83,6 +85,45 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==================== Rate Limiter ====================
+_rate_limit_store: Dict[str, list] = {}  # {client_ip: [timestamp, ...]}
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_MAX_REQUESTS = 60  # per window per IP
+_RATE_LIMIT_AI_MAX = 10  # per window for AI endpoints
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Simple in-memory rate limiter."""
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    # Determine limit based on endpoint
+    path = request.url.path
+    if any(ai_path in path for ai_path in ["/ask", "/api/lab-report", "/api/symptom", "/api/chat"]):
+        max_requests = _RATE_LIMIT_AI_MAX
+    else:
+        max_requests = _RATE_LIMIT_MAX_REQUESTS
+
+    # Clean old entries and check
+    if client_ip not in _rate_limit_store:
+        _rate_limit_store[client_ip] = []
+
+    # Remove timestamps outside the window
+    _rate_limit_store[client_ip] = [
+        t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW
+    ]
+
+    if len(_rate_limit_store[client_ip]) >= max_requests:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "请求过于频繁，请稍后再试"}
+        )
+
+    _rate_limit_store[client_ip].append(now)
+    response = await call_next(request)
+    return response
 
 
 @app.exception_handler(Exception)

@@ -8,8 +8,10 @@ Supports LLM-based parsing with regex fallback.
 
 import re
 import json
+import hashlib
 import logging
 from typing import Dict, List, Optional, Tuple
+from functools import lru_cache
 
 from llm_service import llm_service
 
@@ -690,6 +692,7 @@ class LabReportParser:
     """Intelligent lab report parser with LLM-based parsing and regex fallback."""
 
     def __init__(self):
+        self._eval_cache: Dict[str, dict] = {}
         logger.info("Lab report parser initialized")
 
     async def parse_with_llm(self, text: str, report_type: str = "auto") -> dict:
@@ -826,13 +829,7 @@ class LabReportParser:
     def evaluate_results(self, parsed_data: dict, age_months: int) -> dict:
         """
         Evaluate lab results against age-specific reference ranges.
-
-        Args:
-            parsed_data: dict with "report_type" and "items" (list of indicator dicts)
-            age_months: patient age in months
-
-        Returns:
-            dict with evaluated items, summary, abnormal_count, total_count
+        Uses LRU cache to avoid re-evaluating identical inputs.
         """
         if not parsed_data or not parsed_data.get("items"):
             return {
@@ -842,6 +839,32 @@ class LabReportParser:
                 "abnormal_count": 0,
                 "total_count": 0,
             }
+
+        # Build cache key from items and age
+        cache_data = json.dumps(
+            {"items": parsed_data["items"], "age_months": age_months},
+            sort_keys=True, ensure_ascii=False,
+        )
+        cache_key = hashlib.md5(cache_data.encode()).hexdigest()
+
+        # Check cache
+        cached = self._eval_cache.get(cache_key)
+        if cached:
+            return cached
+
+        result = self._evaluate_impl(parsed_data, age_months)
+
+        # Store in cache (limit size)
+        if len(self._eval_cache) > 100:
+            # Evict oldest entries
+            keys = list(self._eval_cache.keys())[:50]
+            for k in keys:
+                del self._eval_cache[k]
+        self._eval_cache[cache_key] = result
+
+        return result
+
+    def _evaluate_impl(self, parsed_data: dict, age_months: int) -> dict:
 
         age_group = get_age_group(age_months)
         age_label = AGE_GROUPS[age_group]["label"]

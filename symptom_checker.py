@@ -3,6 +3,8 @@ Symptom Checker Service - Infant and toddler symptom classification
 Provides symptom categorization and knowledge base retrieval.
 Does NOT provide medical advice, only symptom classification and related knowledge lookup.
 """
+import hashlib
+import json
 import logging
 from typing import List, Dict, Optional
 
@@ -535,6 +537,7 @@ class SymptomChecker:
 
     def __init__(self):
         self.knowledge_base = knowledge_service
+        self._analysis_cache: Dict[str, dict] = {}
 
     def get_all_categories(self) -> List[Dict]:
         """Get all symptom categories with their symptoms list."""
@@ -629,6 +632,19 @@ class SymptomChecker:
             A dictionary containing matched categories, related knowledge,
             and general precautions.
         """
+        # Build cache key
+        cache_data = json.dumps(
+            {"symptoms": sorted(symptoms), "age_months": age_months,
+             "duration_days": duration_days, "severity": severity},
+            sort_keys=True, ensure_ascii=False,
+        )
+        cache_key = hashlib.md5(cache_data.encode()).hexdigest()
+
+        # Check cache
+        cached = self._analysis_cache.get(cache_key)
+        if cached:
+            return cached
+
         matched_results = self._match_symptoms(symptoms)
 
         # Build analysis results grouped by category
@@ -702,7 +718,7 @@ class SymptomChecker:
             kb_search = self.knowledge_base.search(query, n_results=3)
             knowledge_results = kb_search.get("results", [])
 
-        return {
+        result = {
             "success": True,
             "disclaimer": "本服务仅提供症状分类和相关知识检索，不构成任何就医建议。如有疑虑请及时就医。",
             "age_months": age_months,
@@ -720,6 +736,15 @@ class SymptomChecker:
                 )
             ],
         }
+
+        # Store in cache (limit size)
+        if len(self._analysis_cache) > 100:
+            keys = list(self._analysis_cache.keys())[:50]
+            for k in keys:
+                del self._analysis_cache[k]
+        self._analysis_cache[cache_key] = result
+
+        return result
 
     def _get_age_specific_notes(
         self, age_months: int, category_key: str, symptom_name: str

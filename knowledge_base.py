@@ -707,6 +707,9 @@ class KnowledgeBaseService:
         entry.setdefault("source", "")
         entry.setdefault("keywords", [])
         entry.setdefault("category", "")
+        now = datetime.now().isoformat()
+        entry.setdefault("created_at", now)
+        entry["updated_at"] = now
         self.entries.append(entry)
         self._rebuild_index()
         logger.info(f"Added knowledge entry: {entry['id']} - {entry['title']}")
