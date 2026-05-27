@@ -60,6 +60,13 @@
 - ⚙️ **构建配置**：tsconfig.json + vite-env.d.ts 类型声明
 - 🧹 **代码规范**：ESLint flat config 配置
 
+### v1.8.0 新增
+- 🗄️ **SQLite 数据库迁移**：JSON 文件存储 → SQLite 数据库，9 张数据表 + 索引优化
+- 📊 **数据导入导出**：支持 Excel (.xlsx) 和 CSV (.csv) 格式导入导出
+- 💉 **疫苗接种计划**：中国国家免疫规划疫苗时间表（0-6岁），自动生成接种提醒
+- 📈 **性能监控**：API 请求耗时统计、错误率追踪、慢请求检测
+- 🔧 **数据库迁移工具**：自动从 JSON 文件迁移历史数据到数据库
+
 ## 🛠️ 技术栈
 
 - **框架**: FastAPI 0.109.0
@@ -77,6 +84,11 @@ backend/
 ├── main.py                 # FastAPI 应用入口，定义所有 API 路由
 ├── config.py               # 配置管理（环境变量、路径、参数）
 ├── models.py               # Pydantic 数据模型定义（含枚举校验）
+├── database.py             # SQLite 数据库管理（v1.8.0）
+├── base_service_db.py      # 基于 SQLite 的基础记录服务（v1.8.0）
+├── data_io.py              # 数据导入导出服务（v1.8.0）
+├── vaccine_schedule.py     # 疫苗接种计划服务（v1.8.0）
+├── monitor.py              # 性能监控服务（v1.8.0）
 ├── ocr_service.py          # OCR 服务（图片/PDF 文字提取）
 ├── vector_db.py            # ChromaDB 向量数据库操作
 ├── llm_service.py          # 大语言模型服务（本地/Ollama/云端）
