@@ -25,6 +25,32 @@ async def health_check():
     try:
         db_stats = vector_db_service.get_collection_stats()
         kb_status = knowledge_service.get_status()
+
+        # 数据库状态检查
+        db_status = {"status": "not_initialized"}
+        try:
+            from database import get_db
+            db = get_db()
+            if db and db.conn:
+                # 检查各表记录数
+                tables = ["sleep_records", "diaper_records", "cry_records",
+                          "feeding_records", "growth_records", "reminder_records"]
+                table_counts = {}
+                for table in tables:
+                    try:
+                        count = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                        table_counts[table] = count
+                    except Exception:
+                        table_counts[table] = -1
+                total_records = sum(v for v in table_counts.values() if v >= 0)
+                db_status = {
+                    "status": "online",
+                    "total_records": total_records,
+                    "tables": table_counts
+                }
+        except Exception as e:
+            db_status = {"status": "error", "detail": str(e)}
+
         return {
             "status": "healthy",
             "version": VERSION,
@@ -39,7 +65,8 @@ async def health_check():
                 "knowledge_base": {
                     "status": "ready" if kb_status.get("ready") else "not_ready",
                     "total_entries": kb_status.get("total_entries", 0)
-                }
+                },
+                "database": db_status
             },
             "timestamp": datetime.now().isoformat()
         }
