@@ -498,6 +498,37 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
     - ✅ tsconfig.json + vite-env.d.ts 配置
     - ✅ ESLint flat config 代码规范
 
+- **v1.7.0 (2026-05-27)** - 系统鲁棒性优化
+  - #### v1.7.1 - 性能与稳定性
+    - ✅ API 速率限制（60次/分钟普通，10次/分钟 AI）
+    - ✅ 化验单评估和症状分析 LRU 缓存
+    - ✅ 知识库条目 created_at / updated_at 时间戳
+    - ✅ Docker 多阶段构建优化
+    - ✅ 前端 axios 统一错误拦截器
+  - #### v1.7.2 - 代码质量
+    - ✅ 添加 128 个 pytest 单元测试
+    - ✅ pytest-cov 覆盖率报告支持
+    - ✅ httpx 测试 HTTP 客户端
+  - #### v1.7.3 - 类型安全（前端）
+    - ✅ TypeScript 迁移（.jsx/.js → .tsx/.ts）
+    - ✅ ~20 个接口类型定义
+    - ✅ tsconfig.json + vite-env.d.ts 配置
+    - ✅ ESLint flat config 代码规范
+
+- **v1.6.0 (2026-05-26)** - 移动端正式版本
+  - ✅ 支持 Capacitor 移动端应用调用 API
+  - ✅ CORS 配置优化，支持移动端访问
+  - ✅ API 响应格式优化，适配移动端显示
+  - ✅ 移动端导航优化（汉堡菜单、侧边栏）
+
+- **v1.5.0 (2026-05-22)** - 移动端版本
+  - ✅ Capacitor 移动端打包（Android APK）
+  - ✅ 树状导航菜单（Dashboard、日常记录、健康管理、AI 助手）
+  - ✅ React Router v6 路由控制
+  - ✅ PWA 配置（vite-plugin-pwa）
+  - ✅ 局域网访问支持
+  - ✅ APK 签名配置
+
 - **v1.4.0 (2026-05-21)** - AI 增强版本
   - ✅ 化验单 AI 智能解析（LLM + 正则回退）
   - ✅ 化验单指标评估（年龄特异性参考范围）
