@@ -409,30 +409,82 @@ async def get_today_summary():
         diaper_count = len(diaper_records)
         last_diaper = None
         abnormal_color = False
-        
+        pee_count = 0
+        poop_count = 0
+        colors: list = []
+
         if diaper_records:
-            diaper_records.sort(key=lambda x: x["timestamp"], reverse=True)
+            diaper_records.sort(key=lambda x: x.get("time", ""), reverse=True)
             last_diaper = diaper_records[0]
-            color = last_diaper.get("color")
+            color = last_diaper.get("poop_color") or last_diaper.get("color")
             abnormal_color = color in ["red", "black", "white"]
+            for r in diaper_records:
+                dt = r.get("diaper_type", "")
+                if dt in ("pee", "pee_only", "小便", "尿"):
+                    pee_count += 1
+                elif dt in ("poop", "poop_only", "大便", "便"):
+                    poop_count += 1
+                elif dt in ("both", "pee_poop", "大小便"):
+                    pee_count += 1
+                    poop_count += 1
+                else:
+                    poop_color = r.get("poop_color") or r.get("color")
+                    if poop_color and poop_color not in colors:
+                        colors.append(poop_color)
 
         cry_records = cry_service.get_today_records()
         cry_count = len(cry_records)
         last_cry = None
-        
+        cry_total_minutes = 0
+        cry_is_ongoing = False
+        cry_top_reason = None
+        reason_counts: dict = {}
+
         if cry_records:
-            cry_records.sort(key=lambda x: x["timestamp"], reverse=True)
+            cry_records.sort(key=lambda x: x.get("start_time", ""), reverse=True)
             last_cry = cry_records[0]
+            for r in cry_records:
+                if r.get("is_ongoing"):
+                    cry_is_ongoing = True
+                    start = datetime.strptime(r["start_time"], "%Y-%m-%d %H:%M")
+                    cry_total_minutes += max(0, int((datetime.now() - start).total_seconds() / 60))
+                else:
+                    cry_total_minutes += r.get("duration_minutes", 0)
+                reason = r.get("reason", "")
+                if reason:
+                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            if reason_counts:
+                cry_top_reason = max(reason_counts, key=reason_counts.get)
 
         feeding_records = feeding_service.get_today_records()
         feeding_count = len(feeding_records)
-        total_milk_volume = sum(r.get("milk_volume", 0) for r in feeding_records)
+        total_milk_volume = sum(r.get("amount_ml", 0) or r.get("milk_volume", 0) or 0 for r in feeding_records)
+
+        hours = total_minutes // 60
+        mins = total_minutes % 60
+        total_display = f"{hours}小时{mins}分钟" if hours > 0 else f"{mins}分钟"
+
+        insights: list = []
+        if is_ongoing:
+            insights.append("宝宝正在睡觉中，请保持安静环境。")
+        if cry_is_ongoing:
+            if cry_top_reason:
+                insights.append(f"宝宝正在哭闹，可能原因是：{cry_top_reason}，请及时安抚。")
+            else:
+                insights.append("宝宝正在哭闹中，请及时查看原因。")
+        if abnormal_color:
+            insights.append("⚠️ 检测到异常便便颜色，请密切关注并咨询医生。")
+        if total_milk_volume > 0 and total_milk_volume < 300:
+            insights.append(f"今日总奶量 {total_milk_volume}ml，偏低，请注意观察宝宝进食情况。")
+        elif total_milk_volume > 0 and total_milk_volume > 1000:
+            insights.append(f"今日总奶量 {total_milk_volume}ml，偏高，请注意控制适量。")
 
         return {
             "success": True,
             "date": today,
             "sleep": {
                 "total_minutes": total_minutes,
+                "total_display": total_display,
                 "nap_count": nap_count,
                 "nap_minutes": nap_minutes,
                 "night_minutes": night_minutes,
@@ -440,13 +492,22 @@ async def get_today_summary():
                 "records": sleep_records
             },
             "diaper": {
+                "total_count": diaper_count,
                 "count": diaper_count,
-                "last_diaper": last_diaper,
+                "pee_count": pee_count,
+                "poop_count": poop_count,
+                "colors": colors,
+                "has_abnormal": abnormal_color,
                 "abnormal_color": abnormal_color,
+                "last_diaper": last_diaper,
                 "records": diaper_records
             },
             "cry": {
+                "total_count": cry_count,
                 "count": cry_count,
+                "total_minutes": cry_total_minutes,
+                "is_ongoing": cry_is_ongoing,
+                "top_reason": cry_top_reason,
                 "last_cry": last_cry,
                 "records": cry_records
             },
@@ -454,7 +515,8 @@ async def get_today_summary():
                 "count": feeding_count,
                 "total_milk_volume": total_milk_volume,
                 "records": feeding_records
-            }
+            },
+            "insights": insights
         }
     except Exception as e:
         logger.error(f"获取今日汇总失败: {str(e)}")

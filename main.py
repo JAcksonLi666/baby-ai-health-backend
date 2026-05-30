@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
 
 # ==================== 数据导入导出 API ====================
-from data_io import export_to_csv, export_to_excel, import_from_csv, import_from_excel, get_supported_types
+from data_io import export_to_csv, export_to_excel, import_from_csv, import_from_excel, get_supported_types, RECORD_FIELDS
 
 @app.get("/api/export/types")
 async def get_export_types():
@@ -145,43 +145,38 @@ async def get_export_types():
 
 @app.get("/api/export/{record_type}")
 async def export_records(record_type: str, format: str = "csv", date_from: str = None, date_to: str = None):
-    """导出记录（支持 csv 和 xlsx 格式）"""
-    from database import get_db
-    db = get_db()
+    """导出记录（支持 csv 和 xlsx 格式，从 JSON 文件存储读取）"""
+    from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service, reminder_service
 
-    table_map = {
-        "sleep": "sleep_records", "diaper": "diaper_records",
-        "cry": "cry_records", "feeding": "feeding_records",
-        "growth": "growth_records", "reminder": "reminder_records",
+    service_map = {
+        "sleep": sleep_service, "diaper": diaper_service,
+        "cry": cry_service, "feeding": feeding_service,
+        "growth": growth_service, "reminder": reminder_service,
     }
 
-    if record_type not in table_map:
+    if record_type not in service_map:
         raise HTTPException(status_code=400, detail=f"不支持的记录类型: {record_type}")
 
-    table = table_map[record_type]
-    conditions = []
-    params = []
+    service = service_map[record_type]
+    all_records = service._read_all()
 
+    date_field = RECORD_FIELDS.get(record_type, {}).get("date_field", "created_at")
     if date_from:
-        conditions.append("created_at >= ?")
-        params.append(date_from)
+        all_records = [r for r in all_records if (r.get(date_field) or "") >= date_from]
     if date_to:
-        conditions.append("created_at <= ?")
-        params.append(date_to + "T23:59:59")
+        all_records = [r for r in all_records if (r.get(date_field) or "") <= date_to]
 
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    rows = db.execute(f"SELECT * FROM {table} {where} ORDER BY created_at DESC", params).fetchall()
-    records = [dict(row) for row in rows]
+    all_records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
 
     if format == "xlsx":
-        content = export_to_excel(records, record_type)
+        content = export_to_excel(all_records, record_type)
         return Response(
             content=content,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename={record_type}_export.xlsx"}
         )
     else:
-        content = export_to_csv(records, record_type)
+        content = export_to_csv(all_records, record_type)
         return StreamingResponse(
             iter([content]),
             media_type="text/csv; charset=utf-8",
@@ -202,31 +197,21 @@ async def import_records(record_type: str, file: UploadFile):
         else:
             raise HTTPException(status_code=400, detail="仅支持 .csv 和 .xlsx 格式")
 
-        # 写入数据库
-        from database import get_db
-        from base_service_db import BaseRecordServiceDB
+        # 写入 JSON 文件存储（与 daily_records 一致）
+        from daily_records import sleep_service, diaper_service, cry_service, feeding_service, growth_service, reminder_service
 
-        table_map = {
-            "sleep": ("sleep_records", "sleep", "start_time"),
-            "diaper": ("diaper_records", "diaper", "time"),
-            "cry": ("cry_records", "cry", "start_time"),
-            "feeding": ("feeding_records", "feeding", "time"),
-            "growth": ("growth_records", "growth", "record_date"),
-            "reminder": ("reminder_records", "reminder", "reminder_date"),
+        service_map = {
+            "sleep": sleep_service, "diaper": diaper_service,
+            "cry": cry_service, "feeding": feeding_service,
+            "growth": growth_service, "reminder": reminder_service,
         }
 
-        if record_type not in table_map:
-            raise HTTPException(status_code=400, detail=f"不支持的记录类型: {record_type}")
-
-        table_name, prefix, date_field = table_map[record_type]
-        service = BaseRecordServiceDB(table_name, date_field)
-
+        service = service_map[record_type]
         imported = 0
         for record in records:
-            # 过滤掉全空记录
             if all(v is None or v == "" for k, v in record.items()):
                 continue
-            service.create(prefix, record)
+            service.create(record)
             imported += 1
 
         return {"success": True, "imported": imported, "total": len(records)}

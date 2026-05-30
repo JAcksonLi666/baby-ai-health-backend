@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
-from models import AskRequest, AskResponse, LabReportParseRequest, LabReportResponse, SymptomCheckRequest
+from models import AskRequest, AskResponse, LabReportParseRequest, LabReportEvaluateRequest, LabReportResponse, SymptomCheckRequest
 from rag_service import rag_service
 from lab_report_parser import lab_report_parser
 from symptom_checker import symptom_checker
@@ -194,9 +194,9 @@ async def search_status():
 # --- 化验单解析 ---
 @router.post("/api/lab-report/parse", response_model=LabReportResponse)
 async def parse_lab_report(request: LabReportParseRequest):
-    """解析化验单数据"""
+    """解析化验单数据（从 OCR 文本）"""
     try:
-        result = lab_report_parser.parse_report(request.report_type, request.indicators, request.month_age)
+        result = await lab_report_parser.parse_with_llm(request.text, request.report_type.value)
         return result
     except Exception as e:
         logger.error(f"化验单解析失败: {str(e)}")
@@ -204,10 +204,28 @@ async def parse_lab_report(request: LabReportParseRequest):
 
 
 @router.post("/api/lab-report/evaluate")
-async def evaluate_lab_report(request: LabReportParseRequest):
-    """评估化验单指标"""
+async def evaluate_lab_report(request: LabReportEvaluateRequest):
+    """评估化验单指标（手动输入）"""
     try:
-        result = lab_report_parser.evaluate_report(request.report_type, request.indicators, request.month_age)
+        parsed_data = {
+            "report_type": request.report_type.value,
+            "items": []
+        }
+        for ind in request.indicators:
+            val = ind.get("value")
+            if val is not None and val != "":
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    val = None
+            parsed_data["items"].append({
+                "name": ind.get("name", ""),
+                "value": val,
+                "unit": ind.get("unit", ""),
+            })
+
+        result = lab_report_parser.evaluate_results(parsed_data, request.month_age)
+        result["report_type"] = request.report_type.value
         return result
     except Exception as e:
         logger.error(f"化验单评估失败: {str(e)}")
@@ -219,7 +237,7 @@ async def evaluate_lab_report(request: LabReportParseRequest):
 async def analyze_symptoms(request: SymptomCheckRequest):
     """分析症状"""
     try:
-        result = symptom_checker.analyze(request.symptoms, request.month_age)
+        result = await symptom_checker.analyze_symptoms(request.symptoms, request.age_months)
         return result
     except Exception as e:
         logger.error(f"症状分析失败: {str(e)}")

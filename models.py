@@ -190,6 +190,7 @@ class CryRecordResponse(BaseModel):
     updated_at: Optional[str] = None
 
 class TodaySummaryResponse(BaseModel):
+    success: bool = True
     date: str
     sleep: dict
     diaper: dict
@@ -343,10 +344,17 @@ class ReportType(str, Enum):
     kidney_function = "kidney_function"
 
 class LabReportParseRequest(BaseModel):
-    """Request model for lab report parsing."""
+    """Request model for lab report parsing (OCR text)."""
     text: str = Field(..., description="OCR extracted text from lab report")
     report_type: ReportType = Field(default=ReportType.auto, description="Report type: auto/blood/urine/liver/kidney")
     age_months: int = Field(default=6, ge=0, le=144, description="Patient age in months")
+
+
+class LabReportEvaluateRequest(BaseModel):
+    """Request model for lab report evaluation (manual indicator input)."""
+    report_type: ReportType = Field(..., description="Report type")
+    month_age: int = Field(..., ge=0, le=144, description="Patient age in months")
+    indicators: List[dict] = Field(default=[], description="List of indicator dicts with name/value/unit")
 
 
 class LabReportItem(BaseModel):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Query, HTTPException
+from fastapi import APIRouter, UploadFile, File, Query, Form, HTTPException
 from models import UploadResponse
 from config import UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_EXTENSIONS
 from ocr_service import ocr_service
@@ -77,8 +77,8 @@ async def preview_upload(file: UploadFile = File(...)):
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    record_date: str = Query(None, description="记录日期 (YYYY-MM-DD)"),
-    record_type: str = Query("general", description="记录类型: blood_test, urine_test, general")
+    record_date: str = Form(None, description="记录日期 (YYYY-MM-DD)"),
+    record_type: str = Form("general", description="记录类型: blood_test, urine_test, general")
 ):
     """上传化验单图片或 PDF，进行 OCR 识别和向量化存储"""
     file_ext = Path(file.filename).suffix.lower()
@@ -248,6 +248,7 @@ async def update_record(
                     break
             text = '\n'.join(lines)
         
+        vector_db_service.delete_record(record_id)
         success = vector_db_service.add_record(
             record_id=record_id,
             text=text,
@@ -256,7 +257,6 @@ async def update_record(
         )
         
         if success:
-            vector_db_service.delete_record(record_id)
             return {
                 "success": True,
                 "message": f"记录 {record_id} 已更新",
