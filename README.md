@@ -61,11 +61,21 @@
 - 🧹 **代码规范**：ESLint flat config 配置
 
 ### v1.8.0 新增
-- 🗄️ **SQLite 数据库迁移**：JSON 文件存储 → SQLite 数据库，9 张数据表 + 索引优化
-- 📊 **数据导入导出**：支持 Excel (.xlsx) 和 CSV (.csv) 格式导入导出
+- 🗄️ **SQLite 数据库**：对话历史 / 知识库迁移至 SQLite，日常记录仍在 JSON 文件存储
+- 📊 **数据导入导出**：支持 Excel (.xlsx) 和 CSV (.csv) 格式，直接从 JSON 存储源读写
 - 💉 **疫苗接种计划**：中国国家免疫规划疫苗时间表（0-6岁），自动生成接种提醒
 - 📈 **性能监控**：API 请求耗时统计、错误率追踪、慢请求检测
 - 🔧 **数据库迁移工具**：自动从 JSON 文件迁移历史数据到数据库
+
+### v1.8.1 自洽性修复（2026-05-30）
+- 🐛 **7 项后端对接漏洞修复**：
+  - `/api/today/summary` 排序字段 KeyError (timestamp → time/start_time) + 缺失数据字段补充
+  - `/api/lab-report/parse` & `/evaluate` 调用不存在的方法名 (evaluate_report → evaluate_results)
+  - `/api/symptom/analyze` 调用不存在的方法名 + 参数名 (analyze → analyze_symptoms, month_age → age_months)
+  - 上传接口 `record_date`/`record_type` 参数接收方式 (Query → Form)
+  - `TodaySummaryResponse` 模型缺少 `success` 字段
+  - `/record/{id}` PUT 先增后删导致数据丢失
+  - 导入/导出从 JSON 存储源读写（原错误读写空的 SQLite）
 
 ## 🛠️ 技术栈
 
@@ -215,10 +225,10 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 | POST | /upload | 上传化验单图片或 PDF |
 | POST | /upload/preview | 预览识别结果（不保存到数据库） |
 
-**请求参数：**
-- `file`: UploadFile - 化验单文件
-- `record_date`: str (可选) - 记录日期 YYYY-MM-DD
-- `record_type`: str (可选) - 记录类型: blood_test, urine_test, general, other
+**请求参数（multipart/form-data）：**
+- `file`: UploadFile - 化验单文件（必填）
+- `record_date`: str (Form, 可选) - 记录日期 YYYY-MM-DD
+- `record_type`: str (Form, 可选) - 记录类型: blood_test, urine_test, general
 
 ### 智能问答
 
@@ -357,6 +367,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 }
 ```
 
+**report_type 枚举**：`blood_routine`, `urine_routine`, `liver_function`, `kidney_function`, `trace_elements`, `other`
+
 ### AI - 症状自查 (v1.4.0)
 
 | 方法 | 路径 | 描述 |
@@ -367,11 +379,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 **POST /api/symptom/analyze 请求体：**
 ```json
 {
-  "symptoms": [
-    {"key": "cough", "category": "呼吸系统", "name": "咳嗽"},
-    {"key": "fever", "category": "发热", "name": "发热"}
-  ],
-  "month_age": 6
+  "symptoms": ["咳嗽", "发热", "流鼻涕"],
+  "age_months": 6
 }
 ```
 
@@ -460,6 +469,37 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `delete_session()` - 删除会话
 - `get_context_messages()` - 获取 LLM 上下文格式消息
 
+### 9. 数据导入导出 (`data_io.py`) - v1.8.0
+
+- `export_to_csv()` - 导出记录为 CSV 格式
+- `export_to_excel()` - 导出记录为 Excel (.xlsx) 格式
+- `import_from_csv()` - 从 CSV 导入记录
+- `import_from_excel()` - 从 Excel 导入记录
+- `get_supported_types()` - 获取支持的记录类型列表
+- 数据存储源：JSON 文件（`data/daily/` 目录）
+
+### 10. 疫苗接种计划 (`vaccine_schedule.py`) - v1.8.0
+
+- `get_vaccine_schedule()` - 获取完整国家免疫规划疫苗时间表
+- `get_recommended_vaccines()` - 根据月龄获取推荐疫苗
+- `generate_vaccine_reminders()` - 生成疫苗接种提醒
+
+### 11. 性能监控 (`monitor.py`) - v1.8.0
+
+- API 请求耗时统计中间件
+- 错误率追踪与慢请求检测
+- 速率限制（60次/分钟普通接口，10次/分钟 AI 接口）
+
+### 12. 日常记录服务 (`daily_records.py`)
+
+- `SleepRecordService` - 睡眠记录 CRUD + 进行中睡眠管理
+- `DiaperRecordService` - 排泄记录 CRUD + 异常颜色检测
+- `CryRecordService` - 哭声记录 CRUD + 原因分析引擎
+- `FeedingRecordService` - 喂养记录 CRUD（母乳/配方奶/辅食/喝水）
+- `GrowthRecordService` - 生长发育记录 CRUD（体重/身高/头围/体温）
+- `ReminderRecordService` - 提醒记录管理
+- 数据存储：JSON 文件（`data/daily/` 目录下各类型 .json 文件）
+
 ## 📖 API 文档
 
 启动服务后访问：
@@ -487,16 +527,25 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
     - ✅ 化验单评估和症状分析 LRU 缓存
     - ✅ 知识库条目 created_at / updated_at 时间戳
     - ✅ Docker 多阶段构建优化
-    - ✅ 前端 axios 统一错误拦截器
   - #### v1.7.2 - 代码质量
     - ✅ 添加 128 个 pytest 单元测试
     - ✅ pytest-cov 覆盖率报告支持
     - ✅ httpx 测试 HTTP 客户端
-  - #### v1.7.3 - 类型安全（前端）
-    - ✅ TypeScript 迁移（.jsx/.js → .tsx/.ts）
-    - ✅ ~20 个接口类型定义
-    - ✅ tsconfig.json + vite-env.d.ts 配置
-    - ✅ ESLint flat config 代码规范
+- **v1.8.1 (2026-05-30)** - 自洽性修复
+  - ✅ 修复 Dashboard 排序字段 KeyError (timestamp → time/start_time) + 补充缺失数据字段
+  - ✅ 修复 `/api/lab-report/parse` & `/evaluate` 方法名错误 + 新增 LabReportEvaluateRequest 模型
+  - ✅ 修复 `/api/symptom/analyze` 方法名错误 + 参数名修正 (month_age → age_months)
+  - ✅ 修复上传接口 FormData 参数接收 (Query → Form)
+  - ✅ 修复 TodaySummaryResponse 缺少 success 字段
+  - ✅ 修复 `/record/{id}` PUT 先增后删顺序错误
+  - ✅ 修复导入/导出存储源错误 (SQLite → JSON 文件)
+
+- **v1.8.0 (2026-05-28)** - 系统加固版本
+  - ✅ SQLite 数据库迁移（对话历史、知识库）
+  - ✅ 数据导入导出服务（Excel + CSV）
+  - ✅ 疫苗接种计划（中国国家免疫规划）
+  - ✅ 性能监控中间件
+  - ✅ 数据库迁移工具
 
 - **v1.7.0 (2026-05-27)** - 系统鲁棒性优化
   - #### v1.7.1 - 性能与稳定性
